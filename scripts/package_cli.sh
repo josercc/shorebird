@@ -108,7 +108,12 @@ ARCHIVE_BASE="flutterpatch-cli-${VERSION}-${OS}-${ARCH}"
 if [[ "$OS" == "windows" ]]; then
   ARCHIVE="$OUT_DIR/${ARCHIVE_BASE}.zip"
   rm -f "$ARCHIVE"
-  (cd "$OUT_DIR/stage" && zip -qr "$ARCHIVE" flutterpatch)
+  # Prefer zip(1); fall back to Windows tar (GitHub Actions has no zip).
+  if command -v zip >/dev/null 2>&1; then
+    (cd "$OUT_DIR/stage" && zip -qr "$ARCHIVE" flutterpatch)
+  else
+    (cd "$OUT_DIR/stage" && tar -a -cf "$ARCHIVE" flutterpatch)
+  fi
 else
   ARCHIVE="$OUT_DIR/${ARCHIVE_BASE}.tar.gz"
   rm -f "$ARCHIVE"
