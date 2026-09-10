@@ -23,7 +23,6 @@ class ShorebirdYaml {
     required this.appId,
     this.flavors,
     this.baseUrl,
-    this.autoUpdate,
     this.patchVerification,
   });
 
@@ -55,9 +54,6 @@ class ShorebirdYaml {
 
   /// The base url used to check for updates.
   final String? baseUrl;
-
-  /// Whether or not to automatically update the app.
-  final bool? autoUpdate;
 
   /// The patch verification mode for the app.
   final PatchVerification? patchVerification;

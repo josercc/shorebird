@@ -16,3 +16,6 @@ bin/cache/
 # Misc
 .DS_Store
 .claude/
+
+# FVM Version Cache
+.fvm/

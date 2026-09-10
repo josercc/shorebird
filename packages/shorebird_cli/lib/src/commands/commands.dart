@@ -1,15 +1,12 @@
 export 'account/account.dart';
 export 'apps/apps.dart';
 export 'cache/cache.dart';
-export 'channels/channels.dart';
 export 'confirm_name_argument.dart';
 export 'create_command.dart';
 export 'doctor_command.dart';
 export 'flutter/flutter.dart';
 export 'init_command.dart';
-export 'login_ci_command.dart';
-export 'login_command.dart';
-export 'logout_command.dart';
+export 'ota/ota.dart';
 export 'patch/patch.dart';
 export 'patches/patches.dart';
 export 'preview_command.dart';

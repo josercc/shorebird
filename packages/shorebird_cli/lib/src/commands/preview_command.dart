@@ -1,3 +1,4 @@
+// flutterpatch: ownership=UPSTREAM — preview restored for control_api
 // cspell:words devicectl endtemplate bryanoltman sideloadable previewable apks
 // cspell:words bundletool
 import 'dart:async';
@@ -30,7 +31,7 @@ import 'package:yaml/yaml.dart';
 import 'package:yaml_edit/yaml_edit.dart';
 
 /// {@template preview_command}
-/// `shorebird preview` command.
+/// `flutterpatch preview` command.
 /// {@endtemplate}
 class PreviewCommand extends ShorebirdCommand {
   /// {@macro preview_command}

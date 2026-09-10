@@ -93,14 +93,14 @@ To change the version of this release, change your app's version in your pubspec
     if (generateApk && splitApk) {
       logger
         ..err(
-          'Shorebird does not support the split-per-abi option at this time',
+          'FlutterPatch does not support the split-per-abi option at this time',
         )
         ..info(
           '''
 Split APKs are each given a different release version than what is specified in the pubspec.yaml.
 
 See ${link(uri: Uri.parse('https://github.com/flutter/flutter/issues/39817'))} for more information about this issue.
-Please comment and upvote ${link(uri: Uri.parse('https://github.com/shorebirdtech/shorebird/issues/1141'))} if you would like shorebird to support this.''',
+Please comment and upvote ${link(uri: Uri.parse('https://github.com/shorebirdtech/shorebird/issues/1141'))} if you would like FlutterPatch to support this.''',
         );
       throw ProcessExit(ExitCode.unavailable.code);
     }

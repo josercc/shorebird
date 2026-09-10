@@ -12,7 +12,7 @@ final isJsonModeRef = create(() => false);
 bool get isJsonMode => read(isJsonModeRef);
 
 /// Builds the subcommand name from [ArgResults] by walking the command chain
-/// (e.g. "doctor" for `shorebird doctor`, "patch ios" for `shorebird patch ios`).
+/// (e.g. "doctor" for `flutterpatch doctor`, "patch ios" for `flutterpatch patch ios`).
 ///
 /// Returns `null` when no subcommand was recognized (bare `shorebird` invocation).
 String? commandNameFromResults(ArgResults topLevelResults) {
@@ -93,7 +93,7 @@ class JsonError {
   final String message;
 
   /// An optional actionable recovery step
-  /// (e.g. "Run: shorebird login:ci").
+  /// (e.g. "Set FLUTTERPATCH_TOKEN").
   final String? hint;
 
   /// Serializes this error to a JSON-compatible map.

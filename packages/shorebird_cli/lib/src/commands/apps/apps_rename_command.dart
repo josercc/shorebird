@@ -8,7 +8,7 @@ import 'package:shorebird_cli/src/third_party/flutter_tools/lib/src/base/process
 import 'package:shorebird_code_push_protocol/shorebird_code_push_protocol.dart';
 
 /// {@template apps_rename_command}
-/// `shorebird apps rename`
+/// `flutterpatch apps rename`
 /// Change an app's display name.
 /// {@endtemplate}
 class AppsRenameCommand extends ShorebirdCommand {
@@ -41,7 +41,7 @@ class AppsRenameCommand extends ShorebirdCommand {
       'Example output:\n'
       '  Renamed "Acme Mobile" to "Acme Consumer".\n\n'
       '${ShorebirdCommand.jsonHint(
-        'shorebird apps rename --app-id <id> --name "Acme Consumer" --json',
+        'flutterpatch apps rename --app-id <id> --name "Acme Consumer" --json',
       )}';
 
   @override

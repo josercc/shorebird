@@ -345,7 +345,7 @@ void main() {
 ✅ Published Release ${release.version}!'''),
         () => logger.info(postReleaseInstructions),
         () => logger.info(
-          '''To create a patch for this release, run ${lightCyan.wrap('shorebird patch --platforms=android --release-version=${release.version}')}''',
+          '''To create a patch for this release, run ${lightCyan.wrap('flutterpatch patch --platforms=android --release-version=${release.version}')}''',
         ),
       ]);
     });
@@ -528,7 +528,7 @@ void main() {
 ✅ Published Release ${release.version}!'''),
           () => logger.info(postReleaseInstructions),
           () => logger.info(
-            '''To create a patch for this release, run ${lightCyan.wrap('shorebird patch --platforms=android --flavor=$flavor --target=$target --release-version=${release.version}')}''',
+            '''To create a patch for this release, run ${lightCyan.wrap('flutterpatch patch --platforms=android --flavor=$flavor --target=$target --release-version=${release.version}')}''',
           ),
         ]);
       });
@@ -603,6 +603,29 @@ void main() {
             () => runWithOverrides(command.run),
             exitsWithCode(ExitCode.software),
           );
+        });
+      });
+
+      group('when existing release has unknown Flutter revision', () {
+        setUp(() {
+          existingRelease = Release(
+            id: 0,
+            appId: appId,
+            version: releaseVersion,
+            flutterRevision: 'flutterpatch',
+            flutterVersion: null,
+            displayName: '1.2.3+1',
+            platformStatuses: const {
+              ReleasePlatform.ios: ReleaseStatus.active,
+            },
+            createdAt: DateTime(2023),
+            updatedAt: DateTime(2023),
+          );
+        });
+
+        test('allows release so control_api can backfill revision', () async {
+          final exitCode = await runWithOverrides(command.run);
+          expect(exitCode, equals(ExitCode.success.code));
         });
       });
 

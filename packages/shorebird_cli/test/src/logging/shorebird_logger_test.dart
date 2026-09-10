@@ -44,7 +44,7 @@ void main() {
         equals(
           p.join(
             logsDirectory.path,
-            '${date.millisecondsSinceEpoch}_shorebird.log',
+            '${date.millisecondsSinceEpoch}_flutterpatch.log',
           ),
         ),
       );

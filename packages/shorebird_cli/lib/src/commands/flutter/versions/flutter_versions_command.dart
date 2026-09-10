@@ -2,8 +2,8 @@ import 'package:shorebird_cli/src/commands/commands.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
 
 /// {@template flutter_versions_command}
-/// `shorebird flutter versions`
-/// Manage your Shorebird Flutter versions.
+/// `flutterpatch flutter versions`
+/// Manage your FlutterPatch Flutter versions.
 /// {@endtemplate}
 class FlutterVersionsCommand extends ShorebirdCommand {
   /// {@macro flutter_versions_command}
@@ -12,7 +12,7 @@ class FlutterVersionsCommand extends ShorebirdCommand {
   }
 
   @override
-  String get description => 'Manage your Shorebird Flutter versions.';
+  String get description => 'Manage your FlutterPatch Flutter versions.';
 
   @override
   String get name => 'versions';

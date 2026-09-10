@@ -9,15 +9,15 @@ import 'package:shorebird_cli/src/shorebird_process.dart';
 import 'package:shorebird_cli/src/shorebird_validator.dart';
 
 /// {@template shorebird_create_command}
-/// `shorebird create`
-/// Create a new Flutter app with Shorebird.
+/// `flutterpatch create`
+/// Create a new Flutter app with FlutterPatch.
 /// {@endtemplate}
 class CreateCommand extends ShorebirdProxyCommand {
   @override
   String get name => 'create';
 
   @override
-  String get description => 'Create a new Flutter project with Shorebird.';
+  String get description => 'Create a new Flutter project with FlutterPatch.';
 
   @override
   Future<int> run() async {

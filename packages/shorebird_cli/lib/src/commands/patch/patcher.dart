@@ -11,6 +11,7 @@ import 'package:shorebird_cli/src/extensions/arg_results.dart';
 import 'package:shorebird_cli/src/extensions/iterable.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/metadata/metadata.dart';
+import 'package:shorebird_cli/src/ota/ota.dart';
 import 'package:shorebird_cli/src/patch_diff_checker.dart';
 import 'package:shorebird_cli/src/platform/platform.dart';
 import 'package:shorebird_cli/src/release_type.dart';
@@ -38,7 +39,7 @@ abstract class Patcher {
   /// The standard link percentage warning.
   static String lowLinkPercentageWarning(double linkPercentage) {
     return '''
-${lightCyan.wrap('shorebird patch')} was only able to share ${linkPercentage.toStringAsFixed(1)}% of Dart code with the released app.
+${lightCyan.wrap('flutterpatch patch')} was only able to share ${linkPercentage.toStringAsFixed(1)}% of Dart code with the released app.
 This is unexpected, and means the application may execute slower than expected after patching.
 Please reach out to us over Discord or Email for help.
 More info: ${troubleshootingUrl.toLink()}.
@@ -135,6 +136,7 @@ More info: ${troubleshootingUrl.toLink()}.
   }
 
   /// Uploads the patch artifacts to the CodePush server.
+  // flutterpatch: ownership=FORK — optional changed_resources from meta_ota
   Future<void> uploadPatchArtifacts({
     required String appId,
     required int releaseId,
@@ -142,6 +144,39 @@ More info: ${troubleshootingUrl.toLink()}.
     required Map<Arch, PatchArtifactBundle> artifacts,
     required DeploymentTrack track,
   }) async {
+    List<Map<String, dynamic>>? changedResources;
+    int? resourceNumber;
+
+    final assetsPath = _optionalString('assets');
+    final baselinePath = _optionalString('baseline-assets');
+    if (assetsPath != null &&
+        assetsPath.isNotEmpty &&
+        baselinePath != null &&
+        baselinePath.isNotEmpty) {
+      final next = loadScannedAssetsFromFile(assetsPath);
+      final baseline = loadScannedAssetsFromFile(baselinePath);
+      var changes = diffScannedAssets(baseline: baseline, next: next);
+      final uploadAssets = !argResults.options.contains('upload-assets') ||
+          argResults['upload-assets'] != false;
+      if (changes.isNotEmpty && uploadAssets) {
+        logger.info('Uploading changed Flutter assets to control plane…');
+        changes = await uploadChangedResourcesToControl(
+          appDir: Directory.current.path,
+          changes: changes,
+          client: codePushClientWrapper.codePushClient,
+          onLog: logger.detail,
+        );
+      }
+      changedResources = [
+        for (final c in changes) Map<String, dynamic>.from(c),
+      ];
+    }
+
+    final resNumRaw = _optionalString('resource-number');
+    if (resNumRaw != null && resNumRaw.trim().isNotEmpty) {
+      resourceNumber = int.tryParse(resNumRaw.trim());
+    }
+
     await codePushClientWrapper.publishPatch(
       appId: appId,
       releaseId: releaseId,
@@ -149,6 +184,8 @@ More info: ${troubleshootingUrl.toLink()}.
       platform: releaseType.releasePlatform,
       track: track,
       patchArtifactBundles: artifacts,
+      changedResources: changedResources,
+      resourceNumber: resourceNumber,
     );
   }
 
@@ -187,6 +224,11 @@ More info: ${troubleshootingUrl.toLink()}.
     }
 
     return null;
+  }
+
+  String? _optionalString(String name) {
+    if (!argResults.options.contains(name)) return null;
+    return argResults[name] as String?;
   }
 
   /// Returns the public key PEM from the configured source, or null.

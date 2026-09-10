@@ -1,23 +1,19 @@
-import 'dart:io';
-
-import 'package:args/command_runner.dart';
-import 'package:mason_logger/mason_logger.dart';
-import 'package:shorebird_cli/src/logging/logging.dart';
+// flutterpatch: ownership=REPLACE
+import 'package:shorebird_cli/src/flutterpatch_unsupported.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
-import 'package:shorebird_cli/src/shorebird_version.dart';
 
 /// {@template upgrade_command}
-/// `shorebird upgrade`
-/// A command which upgrades your copy of Shorebird.
+/// `flutterpatch upgrade` — stubbed; self-update channel not wired yet.
 /// {@endtemplate}
 class UpgradeCommand extends ShorebirdCommand {
   /// {@macro upgrade_command}
   UpgradeCommand();
 
   @override
-  String get description => 'Upgrade your copy of Shorebird.';
+  String get description =>
+      'Upgrade FlutterPatch CLI (not wired to a release channel yet).';
 
-  /// Name of the command, exposed for the [CommandRunner].
+  /// Name of the command.
   static const String commandName = 'upgrade';
 
   @override
@@ -25,46 +21,14 @@ class UpgradeCommand extends ShorebirdCommand {
 
   @override
   Future<int> run() async {
-    final updateCheckProgress = logger.progress('Checking for updates');
-
-    late final String currentVersion;
-    try {
-      currentVersion = await shorebirdVersion.fetchCurrentGitHash();
-    } on ProcessException catch (error) {
-      updateCheckProgress.fail();
-      logger.err('Fetching current version failed: ${error.message}');
-      return ExitCode.software.code;
-    }
-
-    late final String latestVersion;
-    try {
-      latestVersion = await shorebirdVersion.fetchLatestGitHash();
-    } on ProcessException catch (error) {
-      updateCheckProgress.fail();
-      logger.err('Checking for updates failed: ${error.message}');
-      return ExitCode.software.code;
-    }
-
-    updateCheckProgress.complete('Checked for updates');
-
-    final isUpToDate = currentVersion == latestVersion;
-    if (isUpToDate) {
-      logger.info('Shorebird is already at the latest version.');
-      return ExitCode.success.code;
-    }
-
-    final updateProgress = logger.progress('Updating');
-
-    try {
-      await shorebirdVersion.attemptReset(revision: latestVersion);
-    } on ProcessException catch (error) {
-      updateProgress.fail();
-      logger.err('Updating failed: ${error.message}');
-      return ExitCode.software.code;
-    }
-
-    updateProgress.complete('Updated successfully.');
-
-    return ExitCode.success.code;
+    return flutterpatchUnsupported(
+      command: 'upgrade',
+      reason:
+          'This fork does not auto-update from a release channel. Pull the '
+          'latest FlutterPatch CLI instead.',
+      alternative:
+          'cd your shorebird fork && git pull (or merge upstream per '
+          'docs/cli-shorebird-fork.md)',
+    );
   }
 }

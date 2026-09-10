@@ -5,7 +5,6 @@ import 'package:shorebird_cli/src/common_arguments.dart';
 import 'package:shorebird_cli/src/config/config.dart';
 import 'package:shorebird_cli/src/deployment_track.dart';
 import 'package:shorebird_cli/src/extensions/arg_results.dart';
-import 'package:shorebird_cli/src/json_output.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
 import 'package:shorebird_cli/src/shorebird_env.dart';
@@ -42,24 +41,6 @@ class PromoteCommand extends ShorebirdCommand {
 
   @override
   Future<int> run() async {
-    // Deprecated commands don't grow new surface area. Refuse --json with
-    // a structured envelope that points to the replacement command, instead
-    // of leaking a free-form deprecation warning to stdout.
-    if (isJsonMode) {
-      emitJsonError(
-        code: JsonErrorCode.usageError,
-        message:
-            'shorebird patches promote is deprecated and does not support '
-            '--json output.',
-        hint: 'Use `shorebird patches set-track --track=stable` instead.',
-      );
-      return ExitCode.usage.code;
-    }
-
-    logger.warn(
-      '''This command is deprecated and will be removed in a future release. Use `shorebird patches set-track --track=stable` instead.''',
-    );
-
     try {
       await shorebirdValidator.validatePreconditions(
         checkUserIsAuthenticated: true,
@@ -111,7 +92,7 @@ class PromoteCommand extends ShorebirdCommand {
         '''
 No production channel found for app $appId.
       
-This is a bug and should never happen. Please file an issue at https://github.com/shorebirdtech/shorebird/issues/new?assignees=&labels=bug&projects=&template=bug_report.md&title=fix%3A+''',
+This is a bug and should never happen. Please file an issue at https://github.com/josercc/shorebird/issues/new?assignees=&labels=bug&projects=&template=bug_report.md&title=fix%3A+''',
       );
       return ExitCode.software.code;
     }

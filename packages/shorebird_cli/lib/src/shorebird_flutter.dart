@@ -230,7 +230,7 @@ class ShorebirdFlutter {
   ///
   /// Directories left by versions that installed in place predate that
   /// guarantee, so a demonstrably unusable one is discarded and reinstalled
-  /// rather than sending the user to `shorebird cache clean`, which would
+  /// rather than sending the user to `flutterpatch cache clean`, which would
   /// take every other installed revision with it.
   ///
   /// Precache runs on install as a convenience so the first build is not

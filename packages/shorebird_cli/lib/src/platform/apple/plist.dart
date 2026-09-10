@@ -62,7 +62,7 @@ class Plist {
   /// The key in an ExportOptions.plist that, when true, instructs Xcode to
   /// rewrite CFBundleVersion in the exported IPA based on the latest build
   /// number on App Store Connect. This breaks Shorebird, because the build
-  /// number that ships will not match the one Shorebird recorded for the
+  /// number that ships will not match the one FlutterPatch recorded for the
   /// release.
   ///
   /// See https://developer.apple.com/documentation/xcode/distributing-your-app-for-beta-testing-and-releases
@@ -115,7 +115,7 @@ void assertValidExportOptionsPlist(File file) {
       '''
 Exported options plist ${file.path} sets "${Plist.manageAppVersionAndBuildNumberKey}" to true.
 
-Xcode will rewrite the build number in the exported IPA, so the version that ships to App Store Connect will not match the version Shorebird recorded for this release. Patches will fail to apply.
+Xcode will rewrite the build number in the exported IPA, so the version that ships to App Store Connect will not match the version FlutterPatch recorded for this release. Patches will fail to apply.
 
 Set "${Plist.manageAppVersionAndBuildNumberKey}" to false (or remove the key) and try again.
 

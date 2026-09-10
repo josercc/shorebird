@@ -86,7 +86,7 @@ void main() {
           // No ios/Runner.xcodeproj created — simulates a Flutter module or
           // an app without the iOS platform. The validator must silently
           // skip rather than error, otherwise commands like
-          // `shorebird release ios-framework` are blocked.
+          // `flutterpatch release ios-framework` are blocked.
 
           final results = await runWithOverrides(validator.validate);
 
@@ -443,7 +443,7 @@ void main() {
       // Flutter modules (used for add-to-app) keep their generated Xcode
       // project under `.ios/Runner.xcodeproj` rather than `ios/Runner.xcodeproj`.
       // The validator must scan that path; otherwise commands like
-      // `shorebird release ios-framework` either skip validation entirely or
+      // `flutterpatch release ios-framework` either skip validation entirely or
       // (worse) hard-fail because they can't find an `ios/Runner.xcodeproj`.
       group('Flutter module (.ios/)', () {
         setUp(() {

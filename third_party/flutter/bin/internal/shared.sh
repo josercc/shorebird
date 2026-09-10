@@ -227,8 +227,8 @@ function shared::execute() {
   fi
 
   BIN_NAME="$(basename "$PROG_NAME")"
-  case "$BIN_NAME" in    
-    shorebird*)
+  case "$BIN_NAME" in
+    shorebird*|flutterpatch*)
       exec "$DART_PATH" "$SNAPSHOT_PATH" "$@"
       ;;
     *)

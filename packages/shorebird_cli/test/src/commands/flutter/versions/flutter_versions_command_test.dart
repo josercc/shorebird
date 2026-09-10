@@ -8,7 +8,7 @@ void main() {
       expect(command.name, equals('versions'));
       expect(
         command.description,
-        equals('Manage your Shorebird Flutter versions.'),
+        equals('Manage your FlutterPatch Flutter versions.'),
       );
     });
   });

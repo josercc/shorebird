@@ -4,8 +4,8 @@ import 'package:shorebird_cli/src/shorebird_command.dart';
 import 'package:shorebird_cli/src/shorebird_process.dart';
 
 /// {@template flutter_config_command}
-/// `shorebird flutter config`
-/// Manage your Shorebird Flutter Config.
+/// `flutterpatch flutter config`
+/// Manage your FlutterPatch Flutter Config.
 /// {@endtemplate}
 class FlutterConfigCommand extends ShorebirdProxyCommand {
   @override

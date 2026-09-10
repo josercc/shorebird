@@ -15,6 +15,7 @@ import 'package:shorebird_cli/src/extensions/arg_results.dart';
 import 'package:shorebird_cli/src/extensions/string.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/metadata/metadata.dart';
+import 'package:shorebird_cli/src/ota/ota.dart';
 import 'package:shorebird_cli/src/platform.dart';
 import 'package:shorebird_cli/src/platform/platform.dart';
 import 'package:shorebird_cli/src/release_type.dart';
@@ -160,6 +161,13 @@ of the iOS app that is using this module. (aar and ios-framework only)''',
         help: CommonArguments.obfuscateArg.description,
         negatable: false,
       )
+      ..addFlag(
+        'upload-baselines',
+        negatable: false,
+        help:
+            'After a successful release, upload OTA snapshot and resource '
+            'baselines for this platform (scan-assets + check-ota snapshot).',
+      )
       ..addOption(
         'dd-max-bytes',
         defaultsTo: '10000',
@@ -179,7 +187,7 @@ of the iOS app that is using this module. (aar and ios-framework only)''',
 
   @override
   String get description =>
-      'Creates a shorebird release for the provided target platforms.';
+      'Creates a FlutterPatch release for the provided target platforms.';
 
   @override
   String get name => 'release';
@@ -389,6 +397,14 @@ of the iOS app that is using this module. (aar and ios-framework only)''',
 ✅ Published Release ${release.version}!''')
           ..info(releaser.postReleaseInstructions);
 
+        if (results['upload-baselines'] == true) {
+          await _uploadReleaseBaselines(
+            appId: appId,
+            releaseVersion: release.version,
+            platform: releaser.releaseType.releasePlatform.name,
+          );
+        }
+
         printPatchInstructions(
           releaser: releaser,
           releaseVersion: releaseVersion,
@@ -462,13 +478,13 @@ $error''');
     if (revision == null) {
       final openIssueLink = link(
         uri: Uri.parse(
-          'https://github.com/shorebirdtech/shorebird/issues/new?assignees=&labels=feature&projects=&template=feature_request.md&title=feat%3A+',
+          'https://github.com/josercc/shorebird/issues/new?assignees=&labels=feature&projects=&template=feature_request.md&title=feat%3A+',
         ),
         message: 'open an issue',
       );
       logger.err('''
 Version $flutterVersionArg not found. Please $openIssueLink to request a new version.
-Use `shorebird flutter versions list` to list available versions.
+Use `flutterpatch flutter versions list` to list available versions.
 ''');
       throw ProcessExit(ExitCode.software.code);
     }
@@ -499,7 +515,12 @@ Use `shorebird flutter versions list` to list available versions.
 
       // All artifacts associated with a given release must be built
       // with the same Flutter revision.
-      if (existingRelease.flutterRevision != flutterRevision) {
+      // Empty / legacy placeholder means control_api never persisted the
+      // revision (pre-fix rows); allow and let registerRelease backfill.
+      final existingRevision = existingRelease.flutterRevision.trim();
+      final revisionUnknown =
+          existingRevision.isEmpty || existingRevision == 'flutterpatch';
+      if (!revisionUnknown && existingRevision != flutterRevision) {
         final flutterVersion = await shorebirdFlutter.getVersionForRevision(
           flutterRevision: flutterRevision,
         );
@@ -640,6 +661,51 @@ ${summary.join('\n')}
     );
   }
 
+  /// Uploads OTA snapshot + resource baselines after a successful release.
+  // flutterpatch: ownership=FORK — from meta_ota
+  Future<void> _uploadReleaseBaselines({
+    required String appId,
+    required String releaseVersion,
+    required String platform,
+  }) async {
+    final appDir = Directory.current.path;
+    final progress = logger.progress('Uploading OTA baselines');
+    try {
+      final client = codePushClientWrapper.codePushClient;
+      await uploadReleaseSnapshot(
+        SnapshotUploadOptions(
+          flutterDir: appDir,
+          androidDir: Directory('$appDir/android').existsSync()
+              ? '$appDir/android'
+              : null,
+          iosDir: Directory('$appDir/ios').existsSync() ? '$appDir/ios' : null,
+          releaseVersion: releaseVersion,
+          client: client,
+          appId: appId,
+          platform: platform,
+        ),
+      );
+      await uploadReleaseResources(
+        ResourceUploadOptions(
+          appDir: appDir,
+          releaseVersion: releaseVersion,
+          client: client,
+          appId: appId,
+          platform: platform,
+        ),
+      );
+      progress.complete('Uploaded OTA snapshot + resource baselines');
+    } on Exception catch (error) {
+      progress.fail('Failed to upload baselines: $error');
+      logger.info(
+        '''
+Release succeeded; re-run:
+  flutterpatch upload-snapshot --version $releaseVersion --platform $platform
+  flutterpatch upload-resources --version $releaseVersion --platform $platform''',
+      );
+    }
+  }
+
   /// Instructions explaining how to patch the release that was just created.
   void printPatchInstructions({
     required Releaser releaser,
@@ -649,7 +715,7 @@ ${summary.join('\n')}
     String? target,
   }) {
     final baseCommand = [
-      'shorebird patch',
+      'flutterpatch patch',
       '--platforms=${releaseType.cliName}',
       if (flavor != null) '--flavor=$flavor',
       if (target != null) '--target=$target',

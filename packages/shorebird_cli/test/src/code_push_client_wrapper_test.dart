@@ -16,7 +16,6 @@ import 'package:shorebird_cli/src/platform.dart';
 import 'package:shorebird_cli/src/platform/platform.dart';
 import 'package:shorebird_cli/src/shorebird_env.dart';
 import 'package:shorebird_cli/src/shorebird_flutter.dart';
-import 'package:shorebird_cli/src/shorebird_web_console.dart';
 import 'package:shorebird_cli/src/version.dart';
 import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
 import 'package:test/test.dart';
@@ -418,11 +417,11 @@ void main() {
             );
             verify(() => progress.fail()).called(1);
             verify(
-              () => logger.err('Your version of shorebird is out of date.'),
+              () => logger.err('Your version of FlutterPatch is out of date.'),
             ).called(1);
             verify(
               () => logger.info(
-                '''Run ${lightCyan.wrap('shorebird upgrade')} to get the latest version.''',
+                '''Run ${lightCyan.wrap('flutterpatch upgrade')} to get the latest version.''',
               ),
             ).called(1);
           },
@@ -827,15 +826,11 @@ void main() {
               ),
               exitsWithCode(ExitCode.software),
             );
-            final uri = ShorebirdWebConsole.appReleaseUri(appId, releaseId);
-
             verify(
               () => logger.err(
                 '''
 It looks like you have an existing ios release for version ${lightCyan.wrap(release.version)}.
-Please bump your version number and try again.
-
-You can manage this release in the ${link(uri: uri, message: 'Shorebird Console')}''',
+Please bump your version number and try again.''',
               ),
             ).called(1);
           },

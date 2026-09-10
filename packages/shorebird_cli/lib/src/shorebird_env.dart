@@ -10,9 +10,8 @@ import 'package:shorebird_cli/src/config/shorebird_yaml.dart';
 import 'package:shorebird_cli/src/json_output.dart';
 import 'package:shorebird_cli/src/platform.dart';
 import 'package:shorebird_cli/src/shorebird_cli_command_runner.dart';
-import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
 
-/// Exception thrown when the Shorebird cache appears to be corrupted.
+/// Exception thrown when the FlutterPatch cache appears to be corrupted.
 class CacheCorruptedException implements Exception {
   /// Creates a [CacheCorruptedException] explaining why the cache is
   /// considered corrupted via [reason] (a complete sentence).
@@ -24,8 +23,8 @@ class CacheCorruptedException implements Exception {
   const CacheCorruptedException(
     this.reason, {
     this.remedy =
-        'Your Shorebird installation may be corrupted. '
-        "Try running 'shorebird cache clean' and retrying.",
+        'Your FlutterPatch installation may be corrupted. '
+        "Try running 'flutterpatch cache clean' and retrying.",
   });
 
   /// Human-readable explanation of why the cache is considered corrupted.
@@ -74,11 +73,43 @@ class ShorebirdEnv {
     return Directory(p.join(configDirectory.path, 'logs'));
   }
 
-  /// The root directory of the Shorebird install.
+  /// The root directory of the FlutterPatch / Shorebird install.
   ///
-  /// Assumes we are running from $ROOT/bin/cache.
+  /// Layouts:
+  /// - Snapshot (dev / git install): `$ROOT/bin/cache/shorebird.snapshot`
+  /// - Packaged AOT binary: `$ROOT/bin/flutterpatch[.exe]`
+  /// - Override: `FLUTTERPATCH_ROOT` environment variable
   Directory get shorebirdRoot {
-    return File(platform.script.toFilePath()).parent.parent.parent;
+    final fromEnv = platform.environment['FLUTTERPATCH_ROOT'];
+    if (fromEnv != null && fromEnv.trim().isNotEmpty) {
+      return Directory(fromEnv.trim());
+    }
+
+    final scriptFile = File(platform.script.toFilePath());
+    final scriptDir = scriptFile.parent;
+    final scriptDirName = p.basename(scriptDir.path);
+    final parentDir = scriptDir.parent;
+    final parentName = p.basename(parentDir.path);
+
+    // `$ROOT/bin/cache/<snapshot>` → ROOT is three levels up.
+    if (scriptDirName == 'cache' && parentName == 'bin') {
+      return parentDir.parent;
+    }
+
+    // `$ROOT/bin/flutterpatch[.exe]` → ROOT is parent of bin.
+    if (scriptDirName == 'bin') {
+      return parentDir;
+    }
+
+    // Legacy snapshot assumption.
+    return scriptDir.parent.parent.parent;
+  }
+
+  /// Whether this install looks like a git checkout (dev / Shorebird-style).
+  ///
+  /// Packaged AOT installs from the website do not include `.git`.
+  bool get isGitInstall {
+    return Directory(p.join(shorebirdRoot.path, '.git')).existsSync();
   }
 
   /// The Shorebird engine revision.
@@ -279,15 +310,13 @@ class ShorebirdEnv {
       platform.environment['SHOREBIRD_JWT_ISSUER'] ??
       'https://auth.shorebird.dev';
 
-  /// The base URL for the Shorebird code push server that overrides the default
-  /// used by [CodePushClient]. If none is provided, [CodePushClient] will use
-  /// its default.
+  /// Control API base URL from `shorebird.yaml` → `base_url` only.
+  /// Returns null when the file or field is missing (no hardcoded default).
   Uri? get hostedUri {
     try {
-      final baseUrl =
-          platform.environment['SHOREBIRD_HOSTED_URL'] ??
-          getShorebirdYaml()?.baseUrl;
-      return baseUrl == null ? null : Uri.tryParse(baseUrl);
+      final baseUrl = getShorebirdYaml()?.baseUrl;
+      if (baseUrl == null || baseUrl.trim().isEmpty) return null;
+      return Uri.tryParse(baseUrl.trim());
     } on Exception {
       return null;
     }

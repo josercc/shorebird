@@ -365,8 +365,8 @@ void main() {
           ).called(1);
           verify(
             () => logger.info('''
-Please run `shorebird cache clean` and try again. If the issue persists, please
-file a bug report at https://github.com/shorebirdtech/shorebird/issues/new.
+Please run `flutterpatch cache clean` and try again. If the issue persists, please
+file a bug report at https://github.com/josercc/shorebird/issues/new.
 
 Looked in:
   - the libapp.so entries inside the built .aab

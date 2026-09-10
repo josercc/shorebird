@@ -2,7 +2,7 @@ import 'package:shorebird_cli/src/formatters/file_size_formatter.dart';
 import 'package:shorebird_code_push_protocol/shorebird_code_push_protocol.dart';
 
 /// Formats [patch] as the human-readable detail block rendered by
-/// `shorebird patches info`, one line per entry. Optional fields (track,
+/// `flutterpatch patches info`, one line per entry. Optional fields (track,
 /// notes, artifacts) are omitted when absent.
 List<String> formatPatchDetails(ReleasePatch patch) => [
   'ID:          ${patch.id}',

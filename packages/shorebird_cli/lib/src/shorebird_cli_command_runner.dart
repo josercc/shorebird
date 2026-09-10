@@ -20,19 +20,19 @@ import 'package:shorebird_cli/src/third_party/flutter_tools/lib/flutter_tools.da
 import 'package:shorebird_cli/src/version.dart';
 
 /// The name of the executable.
-const executableName = 'shorebird';
+const executableName = 'flutterpatch';
 
 /// The name of the package (e.g. name in the pubspec.yaml).
 const packageName = 'shorebird_cli';
 
 /// The package description.
-const description = 'The shorebird command-line tool';
+const description = 'The FlutterPatch command-line tool';
 
 /// {@template shorebird_cli_command_runner}
 /// A [CommandRunner] for the CLI.
 ///
 /// ```sh
-/// $ shorebird --version
+/// $ flutterpatch --version
 /// ```
 /// {@endtemplate}
 class ShorebirdCliCommandRunner extends CompletionCommandRunner<int> {
@@ -73,20 +73,21 @@ class ShorebirdCliCommandRunner extends CompletionCommandRunner<int> {
     addCommand(AccountCommand());
     addCommand(AppsCommand());
     addCommand(CacheCommand());
-    addCommand(ChannelsCommand());
+    addCommand(CheckOtaCommand());
     addCommand(CreateCommand());
+    addCommand(DiffCommand());
     addCommand(DoctorCommand());
     addCommand(FlutterCommand());
     addCommand(InitCommand());
-    addCommand(LoginCommand());
-    addCommand(LoginCiCommand());
-    addCommand(LogoutCommand());
     addCommand(PatchCommand());
     addCommand(PatchesCommand());
     addCommand(PreviewCommand());
     addCommand(ReleaseCommand());
     addCommand(ReleasesCommand());
+    addCommand(ScanAssetsCommand());
     addCommand(UpgradeCommand());
+    addCommand(UploadResourcesCommand());
+    addCommand(UploadSnapshotCommand());
   }
 
   @override
@@ -174,7 +175,7 @@ class ShorebirdCliCommandRunner extends CompletionCommandRunner<int> {
         JsonResult.error(
           code: JsonErrorCode.usageError,
           message: e.message,
-          hint: 'Run: shorebird --help',
+          hint: 'Run: flutterpatch --help',
           command: executableName,
         ).write();
       } else {
@@ -193,7 +194,7 @@ class ShorebirdCliCommandRunner extends CompletionCommandRunner<int> {
         JsonResult.error(
           code: JsonErrorCode.usageError,
           message: e.message,
-          hint: 'Run: shorebird --help',
+          hint: 'Run: flutterpatch --help',
           command: executableName,
         ).write();
         return ExitCode.usage.code;
@@ -208,14 +209,14 @@ To proxy an option to the flutter command, use the '--' --<option> syntax.
 
 Example:
 
-${lightCyan.wrap("shorebird release android '--' --no-pub lib/main.dart")}''';
+${lightCyan.wrap("flutterpatch release android '--' --no-pub lib/main.dart")}''';
         } else {
           errorMessage = '''
 To proxy an option to the flutter command, use the -- --<option> syntax.
 
 Example:
 
-${lightCyan.wrap('shorebird release android -- --no-pub lib/main.dart')}''';
+${lightCyan.wrap('flutterpatch release android -- --no-pub lib/main.dart')}''';
         }
 
         logger.err(errorMessage);
@@ -259,7 +260,7 @@ ${lightCyan.wrap('shorebird release android -- --no-pub lib/main.dart')}''';
           shorebirdFlutterPrefix.write(' $flutterVersion');
         }
         logger.info('''
-Shorebird $packageVersion • git@github.com:shorebirdtech/shorebird.git
+FlutterPatch $packageVersion • git@github.com:josercc/shorebird.git
 $shorebirdFlutterPrefix • revision ${shorebirdEnv.flutterRevision}
 Engine • revision ${shorebirdEnv.shorebirdEngineRevision}''');
       }
@@ -280,8 +281,8 @@ Engine • revision ${shorebirdEnv.shorebirdEngineRevision}''');
         if (isJsonMode) {
           final subcommand = commandNameFromResults(topLevelResults);
           final hint = subcommand == null
-              ? 'Run: shorebird --help'
-              : 'Run: shorebird $subcommand --help'; // coverage:ignore-line
+              ? 'Run: flutterpatch --help'
+              : 'Run: flutterpatch $subcommand --help'; // coverage:ignore-line
           JsonResult.error(
             code: JsonErrorCode.usageError,
             message: e.message,
@@ -341,7 +342,7 @@ Engine • revision ${shorebirdEnv.shorebirdEngineRevision}''');
         logger.level != Level.verbose) {
       final fileAnIssue = link(
         uri: Uri.parse(
-          'https://github.com/shorebirdtech/shorebird/issues/new/choose',
+          'https://github.com/josercc/shorebird/issues/new/choose',
         ),
         message: 'file an issue',
       );
@@ -371,17 +372,19 @@ ${currentRunLogFile.absolute.path}
     }
   }
 
-  /// If this version of shorebird is on the `stable` branch, checks to see if
+  /// If this version of FlutterPatch is on the `stable` branch, checks to see if
   /// there are newer commits available. If there are, prints a message to the
-  /// user telling them to run `shorebird upgrade`.
+  /// user telling them to run `flutterpatch upgrade`.
   Future<void> _checkForUpdates() async {
+    // Packaged AOT installs are updated by re-downloading from the website.
+    if (!shorebirdEnv.isGitInstall) return;
     try {
       if (await shorebirdVersion.isTrackingStable() &&
           !await shorebirdVersion.isLatest()) {
         logger
           ..info('')
-          ..info('A new version of shorebird is available!')
-          ..info('Run ${lightCyan.wrap('shorebird upgrade')} to upgrade.');
+          ..info('A new version of FlutterPatch is available!')
+          ..info('Run ${lightCyan.wrap('flutterpatch upgrade')} to upgrade.');
       }
     } on Exception catch (error) {
       logger.detail('Unable to check for updates.\n$error');

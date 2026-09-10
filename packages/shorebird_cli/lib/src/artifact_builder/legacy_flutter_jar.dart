@@ -15,7 +15,7 @@ import 'package:path/path.dart' as p;
 /// "File/directory does not exist ... /android-arm/flutter.jar".
 ///
 /// Shorebird builds every ABI (including 32-bit `android-arm`) by default, so
-/// this can surface under `shorebird release` even when a developer's own
+/// this can surface under `flutterpatch release` even when a developer's own
 /// `flutter build` (often arm64-only) does not, which is the confusing
 /// "flutter build works but shorebird fails" symptom.
 ///

@@ -35,8 +35,8 @@ import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
 typedef ResolvePatcher = Patcher Function(ReleaseType releaseType);
 
 /// {@template patch_command}
-/// A command that creates a shorebird patch for the provided target platforms.
-/// `shorebird patch --platforms=android,ios`
+/// A command that creates a FlutterPatch patch for the provided target platforms.
+/// `flutterpatch patch --platforms=android,ios`
 /// {@endtemplate}
 class PatchCommand extends ShorebirdCommand {
   /// {@macro patch_command}
@@ -112,6 +112,29 @@ To target the latest release (e.g. the release that was most recently updated) u
         hide: true,
       )
       ..addOption(
+        'assets',
+        help:
+            'Current scan-assets JSON; with --baseline-assets, diffs are '
+            'uploaded as changed_resources on the patch.',
+      )
+      ..addOption(
+        'baseline-assets',
+        help:
+            'Baseline scan-assets JSON (usually the previous release '
+            'resource config).',
+      )
+      ..addOption(
+        'resource-number',
+        help: 'Associated version resource revision (resources.number).',
+      )
+      ..addFlag(
+        'upload-assets',
+        defaultsTo: true,
+        help:
+            'Upload add/update changed resource files to the control plane '
+            '(content-addressed, deduped).',
+      )
+      ..addOption(
         CommonArguments.exportOptionsPlistArg.name,
         help: CommonArguments.exportOptionsPlistArg.description,
       )
@@ -182,7 +205,7 @@ NOTE: this is ${styleBold.wrap('not')} recommended. Asset changes cannot be incl
 
   @override
   String get description =>
-      'Creates a shorebird patch for the provided target platforms.';
+      'Creates a FlutterPatch patch for the provided target platforms.';
 
   @override
   String get name => 'patch';
@@ -634,7 +657,7 @@ Building patch with Flutter $flutterVersionString
     if (!contains) {
       final platformName = releasePlatform.name;
       logger.err(
-        '''No release exists for $platformName in release version ${release.version}. Please run shorebird release $platformName to create one.''',
+        '''No release exists for $platformName in release version ${release.version}. Please run flutterpatch release $platformName to create one.''',
       );
       throw ProcessExit(ExitCode.software.code);
     }

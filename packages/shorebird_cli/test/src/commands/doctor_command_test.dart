@@ -178,7 +178,7 @@ Engine • revision $shorebirdEngineRevision
         expect(
           msg,
           equals('''
-Shorebird $packageVersion • git@github.com:shorebirdtech/shorebird.git
+FlutterPatch $packageVersion • git@github.com:josercc/shorebird.git
 Flutter • revision ${shorebirdEnv.flutterRevision}
 Engine • revision $shorebirdEngineRevision
 
@@ -218,7 +218,7 @@ OpenJDK 64-Bit Server VM (build 17.0.9+0-17.0.9b1087.7-11185874, mixed mode)'''
         expect(
           msg.replaceAll(Platform.lineTerminator, '\n'),
           equals('''
-Shorebird $packageVersion • git@github.com:shorebirdtech/shorebird.git
+FlutterPatch $packageVersion • git@github.com:josercc/shorebird.git
 Flutter • revision ${shorebirdEnv.flutterRevision}
 Engine • revision $shorebirdEngineRevision
 
@@ -275,7 +275,7 @@ OpenJDK 64-Bit Server VM (build 17.0.9+0-17.0.9b1087.7-11185874, mixed mode)'''
           expect(
             msg.replaceAll(Platform.lineTerminator, '\n'),
             equals('''
-Shorebird $packageVersion • git@github.com:shorebirdtech/shorebird.git
+FlutterPatch $packageVersion • git@github.com:josercc/shorebird.git
 Flutter • revision ${shorebirdEnv.flutterRevision}
 Engine • revision $shorebirdEngineRevision
 

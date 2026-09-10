@@ -47,7 +47,7 @@ class PubspecEditor {
         // block above it. That is the shape `flutter create` emits --
         // `flutter:` holding only `uses-material-design: true`, with three
         // lines of comment above describing it -- so almost every first
-        // `shorebird init` rewrote a comment onto the wrong line. With two or
+        // `flutterpatch init` rewrote a comment onto the wrong line. With two or
         // more keys the same call appends correctly, which is why this went
         // unnoticed: it only misfires on the default project.
         //

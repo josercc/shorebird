@@ -19,7 +19,7 @@ import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
 ///
 /// Sample usage:
 /// ```sh
-/// shorebird patches rollforward --release-version=1.0.0+1 --patch-number=1
+/// flutterpatch patches rollforward --release-version=1.0.0+1 --patch-number=1
 /// ```
 /// {@endtemplate}
 class RollforwardCommand extends ShorebirdCommand with PatchNumberArgument {
@@ -67,7 +67,7 @@ class RollforwardCommand extends ShorebirdCommand with PatchNumberArgument {
       '  Track:       stable\n'
       '  Rolled back: no\n\n'
       '${ShorebirdCommand.jsonHint(
-        'shorebird patches rollforward --release-version 1.0.0+1 '
+        'flutterpatch patches rollforward --release-version 1.0.0+1 '
         '--patch-number 1 --app-id <id> --json',
       )}';
 

@@ -78,12 +78,9 @@ class ShorebirdValidator {
 
     if (checkUserIsAuthenticated && !auth.isAuthenticated) {
       logger
-        ..err('You must be logged in to run this command.')
+        ..err('You must be authenticated to run this command.')
         ..info(
-          '''If you already have an account, run ${lightCyan.wrap('shorebird login')} to sign in.''',
-        )
-        ..info(
-          '''If you don't have a Shorebird account, go to ${link(uri: Uri.parse('https://console.shorebird.dev'))} to create one.''',
+          '''Set ${lightCyan.wrap('FLUTTERPATCH_TOKEN')} to an admin or API token.''',
         );
       throw UserNotAuthorizedException();
     }
@@ -92,10 +89,10 @@ class ShorebirdValidator {
       if (!shorebirdEnv.hasShorebirdYaml) {
         logger
           ..err(
-            '''Unable to find shorebird.yaml. Are you in a shorebird app directory?''',
+            '''Unable to find shorebird.yaml. Are you in a flutterpatch app directory?''',
           )
           ..info(
-            '''If you have not yet initialized your app, run ${lightCyan.wrap('shorebird init')} to get started.''',
+            '''If you have not yet initialized your app, run ${lightCyan.wrap('flutterpatch init')} to get started.''',
           );
         throw ShorebirdNotInitializedException();
       }
@@ -195,14 +192,14 @@ To fix, update your pubspec.yaml to include the following:
 
   /// Logs a message indicating that validation failed. If any of the issues
   /// can be automatically fixed, this also prompts the user to run
-  /// `shorebird doctor --fix`.
+  /// `flutterpatch doctor --fix`.
   void logValidationFailure({required List<ValidationIssue> issues}) {
     logger.err('Aborting due to validation errors.');
 
     final fixableIssues = issues.where((issue) => issue.fix != null);
     if (fixableIssues.isNotEmpty) {
       logger.info(
-        '''${fixableIssues.length} issue${fixableIssues.length == 1 ? '' : 's'} can be fixed automatically with ${lightCyan.wrap('shorebird doctor --fix')}.''',
+        '''${fixableIssues.length} issue${fixableIssues.length == 1 ? '' : 's'} can be fixed automatically with ${lightCyan.wrap('flutterpatch doctor --fix')}.''',
       );
     }
   }

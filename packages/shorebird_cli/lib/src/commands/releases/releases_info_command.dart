@@ -8,7 +8,7 @@ import 'package:shorebird_cli/src/third_party/flutter_tools/lib/src/base/process
 import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
 
 /// {@template releases_info_command}
-/// `shorebird releases info`
+/// `flutterpatch releases info`
 /// Show details for a specific release.
 /// {@endtemplate}
 class ReleasesInfoCommand extends ShorebirdCommand {
@@ -49,7 +49,7 @@ class ReleasesInfoCommand extends ShorebirdCommand {
       '    ios:      draft\n'
       '    macos:    active\n'
       '    windows:  active\n\n'
-      '${ShorebirdCommand.jsonHint('shorebird releases info --release-version 1.0.0+1 --app-id <id> --json')}';
+      '${ShorebirdCommand.jsonHint('flutterpatch releases info --release-version 1.0.0+1 --app-id <id> --json')}';
 
   @override
   Future<int> run() async {

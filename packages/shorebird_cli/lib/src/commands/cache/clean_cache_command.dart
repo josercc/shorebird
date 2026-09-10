@@ -8,15 +8,15 @@ import 'package:shorebird_cli/src/platform.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
 
 /// {@template clean_cache_command}
-/// `shorebird cache clean`
-/// Clears the Shorebird cache directory.
+/// `flutterpatch cache clean`
+/// Clears the FlutterPatch cache directory.
 /// {@endtemplate}
 class CleanCacheCommand extends ShorebirdCommand {
   /// {@macro clean_cache_command}
   CleanCacheCommand();
 
   @override
-  String get description => 'Clears the Shorebird cache directory.';
+  String get description => 'Clears the FlutterPatch cache directory.';
 
   @override
   String get name => 'clean';

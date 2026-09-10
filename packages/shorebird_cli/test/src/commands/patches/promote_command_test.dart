@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:args/args.dart';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:mocktail/mocktail.dart';
@@ -16,7 +14,6 @@ import 'package:shorebird_code_push_protocol/shorebird_code_push_protocol.dart';
 import 'package:test/test.dart';
 
 import '../../fakes.dart';
-import '../../helpers.dart';
 import '../../mocks.dart';
 
 void main() {
@@ -130,18 +127,6 @@ void main() {
       expect(command.description, isNotEmpty);
     });
 
-    test('logs warning about deprecation', () async {
-      await runWithOverrides(() async {
-        final result = await command.run();
-        expect(result, equals(ExitCode.success.code));
-        verify(
-          () => logger.warn(
-            '''This command is deprecated and will be removed in a future release. Use `shorebird patches set-track --track=stable` instead.''',
-          ),
-        ).called(1);
-      });
-    });
-
     group('when validation fails', () {
       final exception = ShorebirdNotInitializedException();
       setUp(() {
@@ -241,41 +226,26 @@ void main() {
     });
 
     group('--json', () {
-      test(
-        'refuses with structured envelope and points to set-track',
-        () async {
-          final captured = <String>[];
-          final result = await captureStdout(
-            () => runScoped(
-              command.run,
-              values: {
-                codePushClientWrapperRef.overrideWith(
-                  () => codePushClientWrapper,
-                ),
-                isJsonModeRef.overrideWith(() => true),
-                loggerRef.overrideWith(() => logger),
-                shorebirdEnvRef.overrideWith(() => shorebirdEnv),
-                shorebirdValidatorRef.overrideWith(() => shorebirdValidator),
-              },
-            ),
-            captured: captured,
-          );
-          expect(result, equals(ExitCode.usage.code));
-          expect(captured, hasLength(1));
-          final decoded = jsonDecode(captured.first) as Map<String, dynamic>;
-          expect(decoded['status'], 'error');
-          final error = decoded['error'] as Map<String, dynamic>;
-          expect(error['code'], 'usage_error');
-          expect(error['hint'], contains('set-track'));
-          verifyNever(
-            () => codePushClientWrapper.promotePatch(
-              appId: any(named: 'appId'),
-              patchId: any(named: 'patchId'),
-              channel: any(named: 'channel'),
-            ),
-          );
-        },
-      );
+      test('runs successfully in json mode', () async {
+        final result = await runScoped(
+          command.run,
+          values: {
+            codePushClientWrapperRef.overrideWith(() => codePushClientWrapper),
+            isJsonModeRef.overrideWith(() => true),
+            loggerRef.overrideWith(() => logger),
+            shorebirdEnvRef.overrideWith(() => shorebirdEnv),
+            shorebirdValidatorRef.overrideWith(() => shorebirdValidator),
+          },
+        );
+        expect(result, equals(ExitCode.success.code));
+        verify(
+          () => codePushClientWrapper.promotePatch(
+            appId: appId,
+            patchId: patch.id,
+            channel: stableChannel,
+          ),
+        ).called(1);
+      });
     });
   });
 }

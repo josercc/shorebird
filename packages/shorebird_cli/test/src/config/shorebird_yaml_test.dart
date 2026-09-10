@@ -38,7 +38,7 @@ base_url: https://example.com
       expect(shorebirdYaml.baseUrl, 'https://example.com');
     });
 
-    test('can be deserialized without auto-update', () {
+    test('can be deserialized with only app_id', () {
       const yaml = '''
 app_id: test_app_id
 ''';
@@ -49,22 +49,17 @@ app_id: test_app_id
       expect(shorebirdYaml.appId, 'test_app_id');
       expect(shorebirdYaml.flavors, isNull);
       expect(shorebirdYaml.baseUrl, isNull);
-      expect(shorebirdYaml.autoUpdate, isNull);
     });
 
-    test('can be deserialized with auto-update', () {
+    test('rejects auto_update key', () {
       const yaml = '''
 app_id: test_app_id
 auto_update: true
 ''';
-      final shorebirdYaml = checkedYamlDecode(
-        yaml,
-        (m) => ShorebirdYaml.fromJson(m!),
+      expect(
+        () => checkedYamlDecode(yaml, (m) => ShorebirdYaml.fromJson(m!)),
+        throwsA(isA<ParsedYamlException>()),
       );
-      expect(shorebirdYaml.appId, 'test_app_id');
-      expect(shorebirdYaml.flavors, isNull);
-      expect(shorebirdYaml.baseUrl, isNull);
-      expect(shorebirdYaml.autoUpdate, isTrue);
     });
 
     test('can be deserialized without patch_verification', () {

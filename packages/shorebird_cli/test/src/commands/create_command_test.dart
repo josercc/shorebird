@@ -61,7 +61,7 @@ void main() {
       expect(command.name, equals('create'));
       expect(
         command.description,
-        equals('Create a new Flutter project with Shorebird.'),
+        equals('Create a new Flutter project with FlutterPatch.'),
       );
     });
 

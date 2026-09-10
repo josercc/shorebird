@@ -15,8 +15,8 @@ import 'package:shorebird_cli/src/validators/validators.dart';
 import 'package:shorebird_cli/src/version.dart';
 
 /// {@template doctor_command}
-/// `shorebird doctor`
-/// A command that checks for potential issues with the current shorebird
+/// `flutterpatch doctor`
+/// A command that checks for potential issues with the current FlutterPatch
 /// environment.
 /// {@endtemplate}
 class DoctorCommand extends ShorebirdCommand {
@@ -57,7 +57,7 @@ class DoctorCommand extends ShorebirdCommand {
       shorebirdFlutterPrefix.write(' $flutterVersion');
     }
     output.writeln('''
-Shorebird $packageVersion • git@github.com:shorebirdtech/shorebird.git
+FlutterPatch $packageVersion • git@github.com:josercc/shorebird.git
 $shorebirdFlutterPrefix • revision ${shorebirdEnv.flutterRevision}
 Engine • revision ${shorebirdEnv.shorebirdEngineRevision}''');
 

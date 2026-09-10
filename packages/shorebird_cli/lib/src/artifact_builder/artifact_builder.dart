@@ -99,21 +99,21 @@ completes successfully by running the following command:
 
 ${lightCyan.wrap(buildCommand)}
 
-If the above command fails, then this is likely not a Shorebird issue and
-the underlying `flutter build` failure must be resolved for Shorebird to
+If the above command fails, then this is likely not a FlutterPatch issue and
+the underlying `flutter build` failure must be resolved for FlutterPatch to
 build a release.
 
 • If `flutter build` completes successfully, please ensure that you are
 providing the desired flutter version to the release command via 
 the `--flutter-version` option. If you do not specify a `--flutter-version`
-Shorebird will default to the latest stable version of Flutter.
+FlutterPatch will default to the latest stable version of Flutter.
 We strongly encourage always specifying an explicit Flutter version:
 
-${lightCyan.wrap('shorebird release <platform> --flutter-version=3.29.0')}
+${lightCyan.wrap('flutterpatch release <platform> --flutter-version=3.29.0')}
 
-• If `flutter build` completes successfully and `shorebird release`
+• If `flutter build` completes successfully and `flutterpatch release`
 fails when using the same flutter version, please file an issue:
-${link(uri: Uri.parse('https://github.com/shorebirdtech/shorebird/issues/new'))}
+${link(uri: Uri.parse('https://github.com/josercc/shorebird/issues/new'))}
 ''';
 
   /// The fix recommendation for a failed Android build.
@@ -122,7 +122,7 @@ ${link(uri: Uri.parse('https://github.com/shorebirdtech/shorebird/issues/new'))}
   /// plugin in the project still references the legacy `flutter.jar` artifact
   /// (see [LegacyFlutterJarReference]), which is the most common cause of an
   /// Android build that succeeds under `flutter build` but fails under
-  /// `shorebird release`.
+  /// `flutterpatch release`.
   String _androidBuildFixRecommendation(String buildCommand) {
     final vanilla = runVanillaFlutterBuildRecommendation(buildCommand);
     final projectRoot = shorebirdEnv.getShorebirdProjectRoot();
@@ -483,7 +483,7 @@ Reason: Exited with code $exitCode.''',
       throw ArtifactBuildException(
         'Unable to find app.dill file.',
         fixRecommendation:
-            '''Please file a bug at https://github.com/shorebirdtech/shorebird/issues/new with the logs for this command.''',
+            '''Please file a bug at https://github.com/josercc/shorebird/issues/new with the logs for this command.''',
       );
     }
 
@@ -555,7 +555,7 @@ Reason: Exited with code $exitCode.''',
       throw ArtifactBuildException(
         'Unable to find app.dill file.',
         fixRecommendation:
-            '''Please file a bug at https://github.com/shorebirdtech/shorebird/issues/new with the logs for this command.''',
+            '''Please file a bug at https://github.com/josercc/shorebird/issues/new with the logs for this command.''',
       );
     }
 
@@ -620,7 +620,7 @@ Reason: Exited with code $exitCode.''',
       throw ArtifactBuildException(
         'Unable to find app.dill file.',
         fixRecommendation:
-            '''Please file a bug at https://github.com/shorebirdtech/shorebird/issues/new with the logs for this command.''',
+            '''Please file a bug at https://github.com/josercc/shorebird/issues/new with the logs for this command.''',
       );
     }
 

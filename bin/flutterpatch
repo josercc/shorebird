@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -e
+
+# shared.sh expects PROG_NAME, BIN_DIR, and OS to be set.
+# https://gist.github.com/ptc-mrucci/61772387878ed53a6c717d51a21d9371
+# https://stackoverflow.com/questions/59895/how-do-i-get-the-directory-where-a-bash-script-is-located-from-within-the-script/67149152#67149152
+
+BIN_DIR=$(cd "$(dirname "$BASH_SOURCE")"; cd -P "$(dirname "$(readlink "$BASH_SOURCE" || echo .)")"; pwd)
+PROG_NAME="$BIN_DIR/$(basename "$BASH_SOURCE")"
+OS="$(uname -s)"
+
+FLUTTER_VERSION=`cat "$BIN_DIR/internal/flutter.version"`
+
+# If the Flutter SDK for the requested version hasn't been downloaded yet,
+# clear the bootstrap stamp so that shared.sh triggers a re-bootstrap.
+# shared.sh keys the stamp on the Shorebird git revision alone, so changing
+# flutter.version without a new commit would otherwise be ignored.
+if [[ ! -d "$BIN_DIR/cache/flutter/$FLUTTER_VERSION/bin" ]]; then
+  rm -f "$BIN_DIR/cache/shorebird.stamp"
+fi
+
+# When --json is passed, tell shared.sh to redirect bootstrap output
+# (flutter --version, pub get, git) to stderr so stdout is pure JSON.
+for arg in "$@"; do
+  if [[ "$arg" == "--json" ]]; then
+    export SHOREBIRD_JSON_MODE=true
+    break
+  fi
+done
+
+source "$BIN_DIR/../third_party/flutter/bin/internal/shared.sh"
+
+# We currently depend on a forked (3.7.8 stable) Flutter shared.sh script
+# under third_party. Eventually we'll re-write it ourselves.
+shared::execute "$@"

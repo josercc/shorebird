@@ -2,7 +2,7 @@ import 'package:shorebird_cli/src/commands/patches/patches.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
 
 /// {@template patches_command}
-/// Commands for managing Shorebird patches.
+/// Commands for managing FlutterPatch patches.
 /// {@endtemplate}
 class PatchesCommand extends ShorebirdCommand {
   /// {@macro patches_command}
@@ -12,12 +12,11 @@ class PatchesCommand extends ShorebirdCommand {
     addSubcommand(PromoteCommand());
     addSubcommand(RollbackCommand());
     addSubcommand(RollforwardCommand());
-    addSubcommand(SetTrackCommand());
   }
 
   @override
   String get name => 'patches';
 
   @override
-  String get description => 'Manage Shorebird patches.';
+  String get description => 'Manage FlutterPatch patches.';
 }

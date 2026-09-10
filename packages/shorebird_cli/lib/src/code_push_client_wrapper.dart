@@ -20,7 +20,6 @@ import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/platform/platform.dart';
 import 'package:shorebird_cli/src/shorebird_env.dart';
 import 'package:shorebird_cli/src/shorebird_flutter.dart';
-import 'package:shorebird_cli/src/shorebird_web_console.dart';
 import 'package:shorebird_cli/src/third_party/flutter_tools/lib/flutter_tools.dart';
 import 'package:shorebird_cli/src/version.dart';
 import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
@@ -70,10 +69,17 @@ class PatchArtifactBundle extends Equatable {
 
 /// A reference to a [CodePushClientWrapper] instance.
 ScopedRef<CodePushClientWrapper> codePushClientWrapperRef = create(() {
+  final hostedUri = shorebirdEnv.hostedUri;
+  if (hostedUri == null) {
+    throw StateError(
+      'Missing base_url in shorebird.yaml. '
+      'Add e.g. `base_url: http://127.0.0.1:8080` and re-run.',
+    );
+  }
   return CodePushClientWrapper(
     codePushClient: CodePushClient(
       httpClient: auth.client,
-      hostedUri: shorebirdEnv.hostedUri,
+      hostedUri: hostedUri,
       customHeaders: {'x-cli-version': packageVersion},
     ),
   );
@@ -307,13 +313,10 @@ This app may not exist or you may not have permission to view it.''');
     required ReleasePlatform platform,
   }) {
     if (release.platformStatuses[platform] == ReleaseStatus.active) {
-      final uri = ShorebirdWebConsole.appReleaseUri(release.appId, release.id);
       logger.err(
         '''
 It looks like you have an existing ${platform.name} release for version ${lightCyan.wrap(release.version)}.
-Please bump your version number and try again.
-
-You can manage this release in the ${link(uri: uri, message: 'Shorebird Console')}''',
+Please bump your version number and try again.''',
       );
       throw ProcessExit(ExitCode.software.code);
     }
@@ -334,7 +337,7 @@ You can manage this release in the ${link(uri: uri, message: 'Shorebird Console'
 Release not found: "$releaseVersion"
 
 Patches can only be published for existing releases.
-Please create a release using "shorebird release" and try again.
+Please create a release using "flutterpatch release" and try again.
 ''');
       throw ProcessExit(ExitCode.software.code);
     }
@@ -570,8 +573,8 @@ Please create a release using "shorebird release" and try again.
         message: '''
 Cannot find release build artifacts.
 
-Please run `shorebird cache clean` and try again. If the issue persists, please
-file a bug report at https://github.com/shorebirdtech/shorebird/issues/new.
+Please run `flutterpatch cache clean` and try again. If the issue persists, please
+file a bug report at https://github.com/josercc/shorebird/issues/new.
 
 Looked in:
   - the libapp.so entries inside the built .aab
@@ -642,13 +645,13 @@ ${arch.arch} artifact already exists, continuing...''');
             '''
 No architecture artifacts found to upload.
 
-Shorebird looked for libapp.so under ${archsDir.path} but every requested
+FlutterPatch looked for libapp.so under ${archsDir.path} but every requested
 architecture was missing:
 ${missingArchPaths.map((p) => '  - $p').join('\n')}
 
 This usually means your project's ndk.abiFilters / splits.abi / jniLibs.excludes
-configuration excludes every architecture Shorebird was asked to build. Either
-relax those filters or pass `--target-platform=<archs>` to restrict Shorebird
+configuration excludes every architecture FlutterPatch was asked to build. Either
+relax those filters or pass `--target-platform=<archs>` to restrict FlutterPatch
 to the architectures your project actually builds.''',
       );
     }
@@ -1015,6 +1018,8 @@ aar artifact already exists, continuing...''');
     required String appId,
     required int releaseId,
     required Json metadata,
+    List<Map<String, dynamic>>? changedResources,
+    int? resourceNumber,
   }) async {
     final createPatchProgress = logger.progress('Creating patch');
     try {
@@ -1022,6 +1027,8 @@ aar artifact already exists, continuing...''');
         appId: appId,
         releaseId: releaseId,
         metadata: metadata,
+        changedResources: changedResources,
+        resourceNumber: resourceNumber,
       );
       createPatchProgress.complete();
       return patch;
@@ -1153,11 +1160,15 @@ aar artifact already exists, continuing...''');
     required ReleasePlatform platform,
     required DeploymentTrack track,
     required Map<Arch, PatchArtifactBundle> patchArtifactBundles,
+    List<Map<String, dynamic>>? changedResources,
+    int? resourceNumber,
   }) async {
     final patch = await createPatch(
       appId: appId,
       releaseId: releaseId,
       metadata: metadata,
+      changedResources: changedResources,
+      resourceNumber: resourceNumber,
     );
 
     await createPatchArtifacts(
@@ -1173,7 +1184,9 @@ aar artifact already exists, continuing...''');
 
     await promotePatch(appId: appId, patchId: patch.id, channel: channel);
 
-    logger.success('\n✅ Published Patch ${patch.number}!');
+    final number =
+        codePushClient.patchNumberFor(patch.id) ?? patch.number;
+    logger.success('\n✅ Published Patch $number!');
   }
 
   /// Returns a GCP download link for measuring download speed.
@@ -1197,9 +1210,9 @@ aar artifact already exists, continuing...''');
     if (error is CodePushUpgradeRequiredException) {
       progress?.fail();
       logger
-        ..err('Your version of shorebird is out of date.')
+        ..err('Your version of FlutterPatch is out of date.')
         ..info(
-          '''Run ${lightCyan.wrap('shorebird upgrade')} to get the latest version.''',
+          '''Run ${lightCyan.wrap('flutterpatch upgrade')} to get the latest version.''',
         );
     } else if (progress != null) {
       progress.fail(message ?? '$error');

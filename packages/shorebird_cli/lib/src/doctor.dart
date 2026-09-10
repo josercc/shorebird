@@ -38,7 +38,7 @@ class Doctor {
     // Check whether powershell is installed?
   ];
 
-  /// Validators that should run during `shorebird doctor` and `shorebird init`.
+  /// Validators that should run during `flutterpatch doctor` and `flutterpatch init`.
   List<Validator> initAndDoctorValidators = [
     ShorebirdVersionValidator(),
     AndroidInternetPermissionValidator(),
@@ -155,7 +155,7 @@ No issues detected!''');
         final fixableIssueCount = allFixableIssues.length;
         logger.info(
           '''
-$fixableIssueCount issue${fixableIssueCount == 1 ? '' : 's'} can be fixed automatically with ${lightCyan.wrap('shorebird doctor --fix')}.''',
+$fixableIssueCount issue${fixableIssueCount == 1 ? '' : 's'} can be fixed automatically with ${lightCyan.wrap('flutterpatch doctor --fix')}.''',
         );
       }
     }

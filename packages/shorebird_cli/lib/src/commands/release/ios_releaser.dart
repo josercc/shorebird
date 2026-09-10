@@ -78,13 +78,13 @@ class IosReleaser extends Releaser with AppleReleaserMixin {
           '''Building for device with codesigning disabled. You will have to manually codesign before deploying to device.''',
         )
         ..warn(
-          '''shorebird preview will not work for releases created with "--no-codesign". However, you can still preview your app by signing the generated .xcarchive in Xcode.''',
+          '''flutterpatch preview will not work for releases created with "--no-codesign". However, you can still preview your app by signing the generated .xcarchive in Xcode.''',
         )
         ..warn(
           '''
 When you distribute the .xcarchive in Xcode, you MUST uncheck "Manage Version and Build Number" in the Distribute App dialog.
 
-If left checked, Xcode will rewrite the build number in the uploaded IPA, so the version that ships to App Store Connect will not match the version Shorebird recorded for this release. Patches will then fail to apply.''',
+If left checked, Xcode will rewrite the build number in the uploaded IPA, so the version that ships to App Store Connect will not match the version FlutterPatch recorded for this release. Patches will then fail to apply.''',
         );
     }
 
@@ -214,7 +214,7 @@ You can open the archive in Xcode by running:
     ${lightCyan.wrap('open $relativeArchivePath')}
 
 ${styleBold.wrap('Make sure to uncheck "Manage Version and Build Number" in the Distribute App dialog.')}
-If left checked, Xcode will rewrite the build number in the uploaded IPA, so the version that ships will not match the one Shorebird recorded for this release, and patches will fail to apply.
+If left checked, Xcode will rewrite the build number in the uploaded IPA, so the version that ships will not match the one FlutterPatch recorded for this release, and patches will fail to apply.
 ''';
     }
   }

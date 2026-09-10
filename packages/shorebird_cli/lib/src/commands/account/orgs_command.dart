@@ -8,7 +8,7 @@ import 'package:shorebird_cli/src/third_party/flutter_tools/lib/src/base/process
 import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
 
 /// {@template orgs_command}
-/// `shorebird account orgs`
+/// `flutterpatch account orgs`
 /// List the organizations the current user belongs to.
 /// {@endtemplate}
 class OrgsCommand extends ShorebirdCommand {
@@ -26,7 +26,7 @@ class OrgsCommand extends ShorebirdCommand {
       '  2  user@example.com  personal  owner\n\n'
       'Type is "personal" or "team". Role is "owner", "admin", or '
       '"developer".\n\n'
-      '${ShorebirdCommand.jsonHint('shorebird account orgs --json')}';
+      '${ShorebirdCommand.jsonHint('flutterpatch account orgs --json')}';
 
   @override
   Future<int> run() async {

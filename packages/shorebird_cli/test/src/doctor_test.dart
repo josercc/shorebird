@@ -166,7 +166,7 @@ with multiple lines''',
                 any(
                   that: stringContainsInOrder([
                     'can be fixed automatically with',
-                    'shorebird doctor --fix',
+                    'flutterpatch doctor --fix',
                   ]),
                 ),
               ),
@@ -184,7 +184,7 @@ with multiple lines''',
               any(
                 that: stringContainsInOrder([
                   'can be fixed automatically with',
-                  'shorebird doctor --fix',
+                  'flutterpatch doctor --fix',
                 ]),
               ),
             ),

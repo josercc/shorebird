@@ -1057,7 +1057,7 @@ origin/flutter_release/3.10.6''';
             File(p.join(debris.single.path, 'leftover')).existsSync(),
             isTrue,
           );
-          // `shorebird cache clean` would have taken this with it.
+          // `flutterpatch cache clean` would have taken this with it.
           expect(otherInstall.existsSync(), isTrue);
           verify(
             () => git.clone(
@@ -1094,7 +1094,7 @@ origin/flutter_release/3.10.6''';
                   that: allOf(
                     contains('Could not move ${targetDirectory.path} aside'),
                     contains('Remove ${targetDirectory.path}'),
-                    isNot(contains('shorebird cache clean')),
+                    isNot(contains('flutterpatch cache clean')),
                   ),
                 ),
               ),
@@ -1550,7 +1550,7 @@ origin/flutter_release/3.10.6''';
                 allOf(
                   contains('oh no!'),
                   contains('Run this command again'),
-                  isNot(contains('shorebird cache clean')),
+                  isNot(contains('flutterpatch cache clean')),
                 ),
               ),
             ),
@@ -1584,7 +1584,7 @@ origin/flutter_release/3.10.6''';
                 allOf(
                   contains('boom'),
                   contains('Run this command again'),
-                  isNot(contains('shorebird cache clean')),
+                  isNot(contains('flutterpatch cache clean')),
                 ),
               ),
             ),

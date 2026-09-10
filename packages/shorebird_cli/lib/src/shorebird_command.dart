@@ -95,7 +95,7 @@ abstract class ShorebirdCommand extends Command<int> {
   /// Suffix appended to command descriptions to advertise `--json` mode.
   ///
   /// [example] should be a complete example invocation, e.g.:
-  ///   `'shorebird releases list --app-id <id> --json'`
+  ///   `'flutterpatch releases list --app-id <id> --json'`
   static String jsonHint(String example) =>
       'Pass --json (global flag) for machine-readable output with all fields:\n'
       '  $example';

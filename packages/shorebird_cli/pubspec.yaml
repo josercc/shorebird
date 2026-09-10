@@ -61,4 +61,4 @@ dev_dependencies:
   test: ^1.31.2
 
 executables:
-  shorebird:
+  flutterpatch: shorebird

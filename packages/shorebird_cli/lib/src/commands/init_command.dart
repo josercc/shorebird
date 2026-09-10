@@ -11,7 +11,6 @@ import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/platform/platform.dart';
 import 'package:shorebird_cli/src/pubspec_editor.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
-import 'package:shorebird_cli/src/shorebird_documentation.dart';
 import 'package:shorebird_cli/src/shorebird_env.dart';
 import 'package:shorebird_cli/src/shorebird_validator.dart';
 import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
@@ -19,8 +18,8 @@ import 'package:yaml_edit/yaml_edit.dart';
 
 /// {@template init_command}
 ///
-/// `shorebird init`
-/// Initialize Shorebird.
+/// `flutterpatch init`
+/// Initialize FlutterPatch.
 /// {@endtemplate}
 class InitCommand extends ShorebirdCommand {
   /// {@macro init_command}
@@ -29,22 +28,29 @@ class InitCommand extends ShorebirdCommand {
       ..addFlag(
         'force',
         abbr: 'f',
-        help: 'Initialize the app even if a "shorebird.yaml" already exists.',
+        help:
+            'Initialize the app even if a "shorebird.yaml" already exists.',
         negatable: false,
       )
       ..addOption(
         'display-name',
         help:
-            'The app name shown in the Shorebird dashboard '
+            'The app name shown in the dashboard '
             '(defaults to the package name in pubspec.yaml). '
             'Must be between 1 and '
             '${CommonArguments.appDisplayNameMaxLength} characters.',
+      )
+      ..addOption(
+        'base-url',
+        help:
+            'FlutterPatch control_api base URL written to shorebird.yaml '
+            '(e.g. http://127.0.0.1:8080).',
       )
       ..addOption('organization-id', help: 'The organization ID to use.');
   }
 
   @override
-  String get description => 'Initialize Shorebird.';
+  String get description => 'Initialize FlutterPatch.';
 
   @override
   String get name => 'init';
@@ -63,7 +69,7 @@ class InitCommand extends ShorebirdCommand {
       if (!shorebirdEnv.hasPubspecYaml) {
         logger.err('''
 Could not find a "pubspec.yaml".
-Please make sure you are running "shorebird init" from within your Flutter project.
+Please make sure you are running "flutterpatch init" from within your Flutter project.
 ''');
         return ExitCode.noInput.code;
       }
@@ -71,6 +77,37 @@ Please make sure you are running "shorebird init" from within your Flutter proje
       logger.err('Error parsing "pubspec.yaml": $error');
       return ExitCode.software.code;
     }
+
+    final projectRoot = shorebirdEnv.getFlutterProjectRoot()!;
+    var baseUrl = results['base-url'] as String?;
+    baseUrl ??= shorebirdEnv.getShorebirdYaml()?.baseUrl;
+    if (baseUrl == null || baseUrl.trim().isEmpty) {
+      if (!shorebirdEnv.canAcceptUserInput) {
+        logger.err(
+          'Missing --base-url. Pass the control_api URL '
+          '(e.g. --base-url=http://127.0.0.1:8080).',
+        );
+        return ExitCode.usage.code;
+      }
+      baseUrl = logger.prompt(
+        '${lightGreen.wrap('?')} FlutterPatch control_api base URL '
+        '(e.g. http://127.0.0.1:8080):',
+      );
+    }
+    baseUrl = baseUrl.trim();
+    if (Uri.tryParse(baseUrl) == null) {
+      logger.err('Invalid base URL: $baseUrl');
+      return ExitCode.usage.code;
+    }
+
+    // Write base_url first so CodePushClient can resolve hostedUri.
+    final existing = shorebirdEnv.getShorebirdYaml();
+    _addShorebirdYamlToProject(
+      projectRoot: projectRoot,
+      appId: existing?.appId ?? 'pending',
+      flavors: existing?.flavors,
+      baseUrl: baseUrl,
+    );
 
     final organizationMemberships = await codePushClientWrapper
         .getOrganizationMemberships();
@@ -126,7 +163,6 @@ Please make sure you are running "shorebird init" from within your Flutter proje
     Set<String>? iosFlavors;
     Set<String>? macosFlavors;
     var productFlavors = <String>{};
-    final projectRoot = shorebirdEnv.getFlutterProjectRoot()!;
     final initializeGradleProgress = logger.progress('Initializing gradlew');
     final bool shouldStartGradleDaemon;
     try {
@@ -224,6 +260,7 @@ Please make sure you are running "shorebird init" from within your Flutter proje
         projectRoot: projectRoot,
         appId: shorebirdYaml.appId,
         flavors: flavorsToAppIds,
+        baseUrl: baseUrl,
       );
       updateShorebirdYamlProgress.complete('Flavors added to shorebird.yaml');
       return ExitCode.success.code;
@@ -233,7 +270,7 @@ Please make sure you are running "shorebird init" from within your Flutter proje
       logger
         ..err('A "shorebird.yaml" file already exists and seems up-to-date.')
         ..info(
-          '''If you want to reinitialize Shorebird, please run ${lightCyan.wrap('shorebird init --force')}.''',
+          '''If you want to reinitialize, run ${lightCyan.wrap('flutterpatch init --force')}.''',
         );
       return ExitCode.software.code;
     }
@@ -315,6 +352,7 @@ Please make sure you are running "shorebird init" from within your Flutter proje
       projectRoot: projectRoot,
       appId: appId,
       flavors: flavors,
+      baseUrl: baseUrl,
     );
 
     if (!shorebirdEnv.pubspecContainsShorebirdYaml) {
@@ -324,19 +362,19 @@ Please make sure you are running "shorebird init" from within your Flutter proje
     logger.info(
       '''
 
-${lightGreen.wrap('🐦 Shorebird initialized successfully!')}
+${lightGreen.wrap('FlutterPatch initialized successfully!')}
 
-✅ A shorebird app has been created.
-✅ A "shorebird.yaml" has been created.
+✅ A FlutterPatch app has been created.
+✅ A "shorebird.yaml" has been created (app_id + base_url).
 ✅ The "pubspec.yaml" has been updated to include "shorebird.yaml" as an asset.
 
 Reference the following commands to get started:
 
-📦 To create a new release use: "${lightCyan.wrap('shorebird release')}".
-🚀 To push an update use: "${lightCyan.wrap('shorebird patch')}".
-👀 To preview a release use: "${lightCyan.wrap('shorebird preview')}".
+📦 To create a new release use: "${lightCyan.wrap('flutterpatch release')}".
+🚀 To push an update use: "${lightCyan.wrap('flutterpatch patch')}".
 
-For more information about Shorebird, visit ${link(uri: Uri.parse('https://shorebird.dev'))}''',
+Auth: export ${lightCyan.wrap('FLUTTERPATCH_TOKEN')}=<token>
+''',
     );
 
     await doctor.runValidators(
@@ -367,27 +405,21 @@ For more information about Shorebird, visit ${link(uri: Uri.parse('https://shore
   ShorebirdYaml _addShorebirdYamlToProject({
     required String appId,
     required Directory projectRoot,
+    required String baseUrl,
     Map<String, String>? flavors,
   }) {
     const content =
         '''
-# This file is used to configure the Shorebird updater used by your app.
-# Learn more at $docsUrl
-# This file does not contain any sensitive information and should be checked into version control.
-
-# Your app_id is the unique identifier assigned to your app.
-# It is used to identify your app when requesting patches from Shorebird's servers.
-# It is not a secret and can be shared publicly.
+# FlutterPatch / OTA configuration. Checked into version control (not a secret).
 app_id:
 
-# auto_update controls if Shorebird should automatically update in the background on launch.
-# If auto_update: false, you will need to use package:shorebird_code_push to trigger updates.
-# https://pub.dev/packages/shorebird_code_push
-# Uncomment the following line to disable automatic updates.
-# auto_update: false
+# control_api base URL (required for CLI + device updater).
+base_url:
 ''';
 
-    final editor = YamlEditor(content)..update(['app_id'], appId);
+    final editor = YamlEditor(content)
+      ..update(['app_id'], appId)
+      ..update(['base_url'], baseUrl);
 
     if (flavors != null) editor.update(['flavors'], flavors);
 
@@ -395,7 +427,7 @@ app_id:
         .getShorebirdYamlFile(cwd: projectRoot)
         .writeAsStringSync(editor.toString());
 
-    return ShorebirdYaml(appId: appId);
+    return ShorebirdYaml(appId: appId, baseUrl: baseUrl, flavors: flavors);
   }
 
   void _logAvailableOrganizations(

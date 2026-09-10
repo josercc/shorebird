@@ -387,7 +387,7 @@ void main() {
             ).called(1);
             verify(
               () => logger.info(
-                '''Try logging out with ${lightBlue.wrap('shorebird logout')} and logging in again.''',
+                '''Try logging out with ${lightBlue.wrap('flutterpatch logout')} and logging in again.''',
               ),
             ).called(1);
             verify(() => logger.detail('Exception: error.')).called(1);
@@ -528,7 +528,7 @@ void main() {
               ).called(1);
               verify(
                 () => logger.info(
-                  '''Try logging out with ${lightBlue.wrap('shorebird logout')} and logging in again.''',
+                  '''Try logging out with ${lightBlue.wrap('flutterpatch logout')} and logging in again.''',
                 ),
               ).called(1);
               verify(
@@ -650,7 +650,7 @@ void main() {
             ).called(1);
             verify(
               () => logger.info(
-                '''Try logging out with ${lightBlue.wrap('shorebird logout')} and logging in again.''',
+                '''Try logging out with ${lightBlue.wrap('flutterpatch logout')} and logging in again.''',
               ),
             ).called(1);
             verify(() => logger.detail('Exception: error.')).called(1);
@@ -804,7 +804,7 @@ void main() {
             ).called(1);
             verify(
               () => logger.info(
-                '''Try logging out with ${lightBlue.wrap('shorebird logout')} and logging in again.''',
+                '''Try logging out with ${lightBlue.wrap('flutterpatch logout')} and logging in again.''',
               ),
             ).called(1);
             verify(
@@ -971,7 +971,7 @@ void main() {
         verify(
           () => logger.warn(
             'SHOREBIRD_TOKEN contains a legacy CI token from '
-            '`shorebird login:ci`. '
+            '`flutterpatch login:ci`. '
             'This format is deprecated and will stop working in a future '
             'release. '
             'Create an API key at https://console.shorebird.dev instead.',

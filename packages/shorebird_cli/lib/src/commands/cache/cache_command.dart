@@ -2,8 +2,8 @@ import 'package:shorebird_cli/src/commands/commands.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
 
 /// {@template cache_command}
-/// `shorebird cache`
-/// Manage the Shorebird cache.
+/// `flutterpatch cache`
+/// Manage the FlutterPatch cache.
 /// {@endtemplate}
 class CacheCommand extends ShorebirdCommand {
   /// {@macro cache_command}
@@ -12,7 +12,7 @@ class CacheCommand extends ShorebirdCommand {
   }
 
   @override
-  String get description => 'Manage the Shorebird cache.';
+  String get description => 'Manage the FlutterPatch cache.';
 
   @override
   String get name => 'cache';

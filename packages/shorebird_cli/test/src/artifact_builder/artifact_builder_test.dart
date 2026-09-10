@@ -1572,7 +1572,7 @@ Reason: Exited with code 70.'''),
                   .having(
                     (e) => e.fixRecommendation,
                     'fixRecommendation',
-                    '''Please file a bug at https://github.com/shorebirdtech/shorebird/issues/new with the logs for this command.''',
+                    '''Please file a bug at https://github.com/josercc/shorebird/issues/new with the logs for this command.''',
                   ),
             ),
           );
@@ -1813,7 +1813,7 @@ Reason: Exited with code 70.'''),
                   .having(
                     (e) => e.fixRecommendation,
                     'fixRecommendation',
-                    '''Please file a bug at https://github.com/shorebirdtech/shorebird/issues/new with the logs for this command.''',
+                    '''Please file a bug at https://github.com/josercc/shorebird/issues/new with the logs for this command.''',
                   ),
             ),
           );
@@ -2027,7 +2027,7 @@ Reason: Exited with code 70.'''),
                       .having(
                         (e) => e.fixRecommendation,
                         'fixRecommendation',
-                        '''Please file a bug at https://github.com/shorebirdtech/shorebird/issues/new with the logs for this command.''',
+                        '''Please file a bug at https://github.com/josercc/shorebird/issues/new with the logs for this command.''',
                       ),
                 ),
               );

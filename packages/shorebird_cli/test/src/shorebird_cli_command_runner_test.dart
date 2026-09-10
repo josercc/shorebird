@@ -169,7 +169,7 @@ To proxy an option to the flutter command, use the -- --<option> syntax.
 
 Example:
 
-${lightCyan.wrap('shorebird release android -- --no-pub lib/main.dart')}'''),
+${lightCyan.wrap('flutterpatch release android -- --no-pub lib/main.dart')}'''),
       ).called(1);
       verify(() => logger.info('exception usage')).called(1);
     });
@@ -198,7 +198,7 @@ To proxy an option to the flutter command, use the '--' --<option> syntax.
 
 Example:
 
-${lightCyan.wrap("shorebird release android '--' --no-pub lib/main.dart")}'''),
+${lightCyan.wrap("flutterpatch release android '--' --no-pub lib/main.dart")}'''),
       ).called(1);
       verify(() => logger.info('exception usage')).called(1);
     });
@@ -212,7 +212,7 @@ ${lightCyan.wrap("shorebird release android '--' --no-pub lib/main.dart")}'''),
 
         verify(
           () => logger.info('''
-Shorebird $packageVersion • git@github.com:shorebirdtech/shorebird.git
+FlutterPatch $packageVersion • git@github.com:josercc/shorebird.git
 Flutter $flutterVersion • revision $flutterRevision
 Engine • revision $shorebirdEngineRevision'''),
         ).called(1);
@@ -370,11 +370,11 @@ Engine • revision $shorebirdEngineRevision'''),
               () => commandRunner.run(['--version']),
             );
             verify(
-              () => logger.info('A new version of shorebird is available!'),
+              () => logger.info('A new version of FlutterPatch is available!'),
             ).called(1);
             verify(
               () => logger.info(
-                'Run ${lightCyan.wrap('shorebird upgrade')} to upgrade.',
+                'Run ${lightCyan.wrap('flutterpatch upgrade')} to upgrade.',
               ),
             ).called(1);
 
@@ -393,7 +393,7 @@ Engine • revision $shorebirdEngineRevision'''),
             );
             expect(result, equals(ExitCode.success.code));
             verifyNever(
-              () => logger.info('A new version of shorebird is available!'),
+              () => logger.info('A new version of FlutterPatch is available!'),
             );
           });
         });
@@ -433,7 +433,7 @@ Engine • revision $shorebirdEngineRevision'''),
 
           verifyNever(shorebirdVersion.isLatest);
           verifyNever(
-            () => logger.info('A new version of shorebird is available!'),
+            () => logger.info('A new version of FlutterPatch is available!'),
           );
         });
       });
@@ -598,7 +598,7 @@ Engine • revision $shorebirdEngineRevision'''),
           expect(json['status'], equals('error'));
           final error = json['error'] as Map<String, dynamic>;
           expect(error['code'], equals('usage_error'));
-          expect(error['hint'], equals('Run: shorebird --help'));
+          expect(error['hint'], equals('Run: flutterpatch --help'));
           final meta = json['meta'] as Map<String, dynamic>;
           expect(meta['command'], equals('shorebird'));
           // Human-readable error must not be written under --json.

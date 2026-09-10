@@ -9,7 +9,7 @@ import 'package:shorebird_cli/src/third_party/flutter_tools/lib/src/base/process
 import 'package:shorebird_code_push_protocol/shorebird_code_push_protocol.dart';
 
 /// {@template apps_delete_command}
-/// `shorebird apps delete`
+/// `flutterpatch apps delete`
 /// Permanently delete an app and every artifact belonging to it.
 /// {@endtemplate}
 class AppsDeleteCommand extends ShorebirdCommand with ConfirmNameArgument {
@@ -42,9 +42,9 @@ class AppsDeleteCommand extends ShorebirdCommand with ConfirmNameArgument {
       'This cannot be undone.\n\n'
       'Requires --$confirmNameArgName=<current display name>; there is no '
       'prompt, so this behaves the same in a terminal and in CI. Run '
-      '"shorebird apps list" to get the exact name.\n\n'
+      '"flutterpatch apps list" to get the exact name.\n\n'
       '${ShorebirdCommand.jsonHint(
-        'shorebird apps delete --app-id <id> --confirm-name "Acme Mobile" '
+        'flutterpatch apps delete --app-id <id> --confirm-name "Acme Mobile" '
         '--json',
       )}';
 

@@ -47,7 +47,7 @@ extension Display on ValidationIssueSeverity {
   }
 }
 
-/// A (potential) problem with the current Shorebird installation or project.
+/// A (potential) problem with the current FlutterPatch installation or project.
 @immutable
 class ValidationIssue {
   /// Creates a new [ValidationIssue].
@@ -105,7 +105,7 @@ class ValidationIssue {
   // coverage:ignore-end
 }
 
-/// Checks for a specific issue with either the Shorebird installation or the
+/// Checks for a specific issue with either the FlutterPatch installation or the
 /// current Shorebird project.
 abstract class Validator {
   /// A one-sentence explanation of what this validator is checking.

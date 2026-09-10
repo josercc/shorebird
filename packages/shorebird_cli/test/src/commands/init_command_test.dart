@@ -182,7 +182,7 @@ environment:
       verify(
         () => logger.err('''
 Could not find a "pubspec.yaml".
-Please make sure you are running "shorebird init" from within your Flutter project.
+Please make sure you are running "flutterpatch init" from within your Flutter project.
 '''),
       ).called(1);
       expect(exitCode, ExitCode.noInput.code);
@@ -208,7 +208,7 @@ Please make sure you are running "shorebird init" from within your Flutter proje
       ).called(1);
       verify(
         () => logger.info(
-          '''If you want to reinitialize Shorebird, please run ${lightCyan.wrap('shorebird init --force')}.''',
+          '''If you want to reinitialize Shorebird, please run ${lightCyan.wrap('flutterpatch init --force')}.''',
         ),
       ).called(1);
       expect(exitCode, ExitCode.software.code);
@@ -1457,9 +1457,9 @@ flutter:
               '✅ A shorebird app has been created.',
               '✅ A "shorebird.yaml" has been created.',
               '''✅ The "pubspec.yaml" has been updated to include "shorebird.yaml" as an asset.''',
-              '''📦 To create a new release use: "${lightCyan.wrap('shorebird release')}".''',
-              '''🚀 To push an update use: "${lightCyan.wrap('shorebird patch')}".''',
-              '''👀 To preview a release use: "${lightCyan.wrap('shorebird preview')}".''',
+              '''📦 To create a new release use: "${lightCyan.wrap('flutterpatch release')}".''',
+              '''🚀 To push an update use: "${lightCyan.wrap('flutterpatch patch')}".''',
+              '''👀 To preview a release use: "${lightCyan.wrap('flutterpatch preview')}".''',
               '''For more information about Shorebird, visit ${link(uri: Uri.parse('https://shorebird.dev'))}''',
               '',
             ]),

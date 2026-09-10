@@ -1,0 +1,192 @@
+# flutterpatch: ownership=OURS — package CLI for website downloads
+name: package_cli
+
+concurrency:
+  group: package-cli-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_to_site:
+        description: "Upload archives to FlutterPatch site_api (needs secrets)"
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "cli-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-latest
+            archive_ext: tar.gz
+          - target: macos-arm64
+            runner: macos-latest
+            archive_ext: tar.gz
+          - target: windows-x64
+            runner: windows-latest
+            archive_ext: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: "3.9.0"
+
+      - name: Package CLI (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          chmod +x scripts/package_cli.sh
+          ./scripts/package_cli.sh "$GITHUB_WORKSPACE/dist/cli"
+
+      - name: Package CLI (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          chmod +x scripts/package_cli.sh
+          ./scripts/package_cli.sh "$GITHUB_WORKSPACE/dist/cli"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutterpatch-cli-${{ matrix.target }}
+          path: dist/cli/flutterpatch-cli-*.${{ matrix.archive_ext }}
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/cli-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/cli
+          pattern: flutterpatch-cli-*
+          merge-multiple: true
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/cli/flutterpatch-cli-*
+          generate_release_notes: true
+          body: |
+            FlutterPatch CLI install packages (AOT).
+
+            **One-click (recommended)**
+
+            ```bash
+            curl -fsSL https://<your-site>/downloads/install_cli.sh | bash
+            ```
+
+            Windows:
+
+            ```powershell
+            iwr -UseBasicParsing https://<your-site>/downloads/install_cli.ps1 | iex
+            ```
+
+            Or extract an archive, add `bin/` to PATH, then run `flutterpatch doctor`.
+            The Shorebird Flutter SDK is initialized by the install script (or on first release/patch).
+
+  # Optional: push to your own site_api download product `flutterpatch-cli`.
+  # Secrets: SITE_API_BASE_URL, SITE_API_ADMIN_TOKEN (Bearer from /admin/v1/login)
+  upload_site:
+    name: Upload to site_api
+    needs: build
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_to_site }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/cli
+          pattern: flutterpatch-cli-*
+          merge-multiple: true
+
+      - name: Upload each platform file
+        env:
+          SITE_API_BASE_URL: ${{ secrets.SITE_API_BASE_URL }}
+          SITE_API_ADMIN_TOKEN: ${{ secrets.SITE_API_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SITE_API_BASE_URL:-}" || -z "${SITE_API_ADMIN_TOKEN:-}" ]]; then
+            echo "Missing SITE_API_BASE_URL or SITE_API_ADMIN_TOKEN secrets." >&2
+            exit 1
+          fi
+          BASE="${SITE_API_BASE_URL%/}"
+          AUTH="Authorization: Bearer ${SITE_API_ADMIN_TOKEN}"
+          VERSION="${GITHUB_REF_NAME#cli-v}"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            VERSION="manual-$(date -u +%Y%m%d%H%M%S)"
+          fi
+
+          PRODUCTS="$(curl -fsS -H "$AUTH" "$BASE/admin/v1/products")"
+          PRODUCT_ID="$(python3 - <<'PY' "$PRODUCTS"
+          import json,sys
+          data=json.loads(sys.argv[1])
+          for p in data.get("items",[]):
+            if p.get("slug")=="flutterpatch-cli":
+              print(p["id"]); break
+          PY
+          )"
+          if [[ -z "$PRODUCT_ID" ]]; then
+            echo "Product flutterpatch-cli not found on site_api." >&2
+            exit 1
+          fi
+          echo "product_id=$PRODUCT_ID version=$VERSION"
+
+          for f in dist/cli/flutterpatch-cli-*; do
+            name="$(basename "$f")"
+            # Parse platform/arch from flutterpatch-cli-<ver>-<os>-<arch>.<ext>
+            platform="$(echo "$name" | sed -E 's/^flutterpatch-cli-[^-]+-([^-]+)-.*/\1/')"
+            arch="$(echo "$name" | sed -E 's/^flutterpatch-cli-[^-]+-[^-]+-([^.]+).*/\1/')"
+            echo "→ $name ($platform/$arch)"
+
+            UPLOAD="$(curl -fsS -X POST \
+              -H "$AUTH" \
+              -H "x-upload-kind: downloads" \
+              -H "x-upload-filename: ${name}" \
+              -H "content-type: application/octet-stream" \
+              --data-binary @"$f" \
+              "$BASE/admin/v1/uploads")"
+
+            object_key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["object_key"])' <<<"$UPLOAD")"
+            sha256="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["sha256"])' <<<"$UPLOAD")"
+            size_bytes="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["size_bytes"])' <<<"$UPLOAD")"
+
+            curl -fsS -X POST \
+              -H "$AUTH" \
+              -H "content-type: application/json" \
+              -d "$(python3 - <<PY
+          import json
+          print(json.dumps({
+            "product_id": "$PRODUCT_ID",
+            "version": "$VERSION",
+            "filename": "$name",
+            "object_key": "$object_key",
+            "sha256": "$sha256",
+            "size_bytes": int("$size_bytes"),
+            "platform": "$platform",
+            "arch": "$arch",
+            "published": True,
+            "changelog": "FlutterPatch CLI $VERSION ($platform-$arch)",
+          }))
+          PY
+          )" \
+              "$BASE/admin/v1/releases"
+            echo "published $name"
+          done

@@ -137,7 +137,7 @@ The release and the patch were built with different build flags. The reason
 above names which flags differ. These come from the build configuration
 (for example --dwarf-stack-traces), not from your Dart source.
 
-Re-run `shorebird patch` with the same build flags used for the release.''';
+Re-run `flutterpatch patch` with the same build flags used for the release.''';
     }
     return null;
   }

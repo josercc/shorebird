@@ -7,7 +7,7 @@ import 'package:shorebird_cli/src/shorebird_command.dart';
 import 'package:shorebird_cli/src/shorebird_flutter.dart';
 
 /// {@template flutter_versions_list_command}
-/// `shorebird flutter versions list`
+/// `flutterpatch flutter versions list`
 /// List available Flutter versions.
 /// {@endtemplate}
 class FlutterVersionsListCommand extends ShorebirdCommand {

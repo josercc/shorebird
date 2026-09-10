@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:shorebird_cli/src/shorebird_env.dart';
 import 'package:shorebird_cli/src/shorebird_version.dart';
 import 'package:shorebird_cli/src/validators/validators.dart';
 
@@ -9,10 +10,15 @@ class ShorebirdVersionValidator extends Validator {
   ShorebirdVersionValidator();
 
   @override
-  String get description => 'Shorebird is up-to-date';
+  String get description => 'FlutterPatch is up-to-date';
 
   @override
   Future<List<ValidationIssue>> validate() async {
+    // Packaged website installs have no git remote; skip upgrade checks.
+    if (!shorebirdEnv.isGitInstall) {
+      return const [];
+    }
+
     final bool isShorebirdUpToDate;
 
     try {
@@ -21,7 +27,7 @@ class ShorebirdVersionValidator extends Validator {
       return [
         ValidationIssue(
           severity: ValidationIssueSeverity.error,
-          message: 'Failed to get shorebird version. Error: ${e.message}',
+          message: 'Failed to get FlutterPatch version. Error: ${e.message}',
         ),
       ];
     }
@@ -31,7 +37,7 @@ class ShorebirdVersionValidator extends Validator {
         const ValidationIssue(
           severity: ValidationIssueSeverity.warning,
           message: '''
-A new version of shorebird is available! Run `shorebird upgrade` to upgrade.''',
+A new version of FlutterPatch is available! Run `flutterpatch upgrade` to upgrade.''',
         ),
       ];
     }

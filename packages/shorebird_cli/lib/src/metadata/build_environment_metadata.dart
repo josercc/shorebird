@@ -115,7 +115,7 @@ class BuildEnvironmentMetadata extends Equatable {
   /// patches.
   ///
   /// Reason: Xcode behavior can change between versions. Ex: the
-  /// `shorebird preview` mechanism changed entirely between Xcode 14 and 15.
+  /// `flutterpatch preview` mechanism changed entirely between Xcode 14 and 15.
   final String? xcodeVersion;
 
   @override

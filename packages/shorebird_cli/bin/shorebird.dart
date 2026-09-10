@@ -46,7 +46,7 @@ Future<void> main(List<String> args) async {
 
   // Write the current command to the top of the log file.
   currentRunLogFile.writeAsStringSync('''
-Command: shorebird ${args.join(' ')}
+Command: flutterpatch ${args.join(' ')}
 
 ''', mode: FileMode.append);
 

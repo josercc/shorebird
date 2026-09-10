@@ -66,7 +66,7 @@ void main() {
         command.description,
         startsWith('Lists the apps you have access to.'),
       );
-      expect(command.description, contains('shorebird apps list --json'));
+      expect(command.description, contains('flutterpatch apps list --json'));
     });
 
     // The listing itself is AccountAppsCommand's, which has its own coverage.

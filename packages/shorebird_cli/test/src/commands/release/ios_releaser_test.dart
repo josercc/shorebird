@@ -557,7 +557,7 @@ $body
           ).called(1);
           verify(
             () => logger.warn(
-              '''shorebird preview will not work for releases created with "--no-codesign". However, you can still preview your app by signing the generated .xcarchive in Xcode.''',
+              '''flutterpatch preview will not work for releases created with "--no-codesign". However, you can still preview your app by signing the generated .xcarchive in Xcode.''',
             ),
           ).called(1);
           verify(
@@ -1186,7 +1186,7 @@ You can open the archive in Xcode by running:
     ${lightCyan.wrap('open ${p.relative(xcarchiveDirectory.path)}')}
 
 ${styleBold.wrap('Make sure to uncheck "Manage Version and Build Number" in the Distribute App dialog.')}
-If left checked, Xcode will rewrite the build number in the uploaded IPA, so the version that ships will not match the one Shorebird recorded for this release, and patches will fail to apply.
+If left checked, Xcode will rewrite the build number in the uploaded IPA, so the version that ships will not match the one FlutterPatch recorded for this release, and patches will fail to apply.
 '''),
           );
         });

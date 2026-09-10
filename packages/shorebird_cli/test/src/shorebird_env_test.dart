@@ -22,8 +22,8 @@ void main() {
 
       expect(
         exception.toString(),
-        'Could not read a file. Your Shorebird installation may be corrupted. '
-        "Try running 'shorebird cache clean' and retrying.",
+        'Could not read a file. Your FlutterPatch installation may be corrupted. '
+        "Try running 'flutterpatch cache clean' and retrying.",
       );
     });
 
@@ -40,7 +40,7 @@ void main() {
         'Could not move /cache/abc123 aside. '
         'Remove /cache/abc123 and run this command again.',
       );
-      expect(exception.toString(), isNot(contains('shorebird cache clean')));
+      expect(exception.toString(), isNot(contains('flutterpatch cache clean')));
     });
   });
 
@@ -110,6 +110,47 @@ void main() {
           runWithOverrides(() => shorebirdEnv.logsDirectory.path),
           endsWith(p.join(executableName, 'logs')),
         );
+      });
+    });
+
+    group('shorebirdRoot', () {
+      test('resolves snapshot layout under bin/cache', () {
+        expect(
+          runWithOverrides(() => shorebirdEnv.shorebirdRoot.path),
+          equals(shorebirdRoot.path),
+        );
+      });
+
+      test('resolves packaged AOT layout under bin/', () {
+        when(() => platform.script).thenReturn(
+          Uri.file(p.join(shorebirdRoot.path, 'bin', 'flutterpatch')),
+        );
+        expect(
+          runWithOverrides(() => shorebirdEnv.shorebirdRoot.path),
+          equals(shorebirdRoot.path),
+        );
+      });
+
+      test('prefers FLUTTERPATCH_ROOT when set', () {
+        final overrideRoot = Directory.systemTemp.createTempSync();
+        when(
+          () => platform.environment,
+        ).thenReturn({'FLUTTERPATCH_ROOT': overrideRoot.path});
+        expect(
+          runWithOverrides(() => shorebirdEnv.shorebirdRoot.path),
+          equals(overrideRoot.path),
+        );
+      });
+    });
+
+    group('isGitInstall', () {
+      test('is false when .git is missing', () {
+        expect(runWithOverrides(() => shorebirdEnv.isGitInstall), isFalse);
+      });
+
+      test('is true when .git exists', () {
+        Directory(p.join(shorebirdRoot.path, '.git')).createSync();
+        expect(runWithOverrides(() => shorebirdEnv.isGitInstall), isTrue);
       });
     });
 
