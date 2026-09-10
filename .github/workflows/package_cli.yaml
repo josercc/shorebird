@@ -53,7 +53,8 @@ jobs:
       - name: Setup Dart
         uses: dart-lang/setup-dart@v1
         with:
-          sdk: "3.9.0"
+          # Matches Flutter 3.47.2 (.fvmrc); needed for very_good_analysis ^10.3.0
+          sdk: "3.13.2"
 
       - name: Package CLI (Unix)
         if: runner.os != 'Windows'
