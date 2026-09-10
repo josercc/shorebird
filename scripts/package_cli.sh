@@ -105,19 +105,21 @@ Notes
 EOF
 
 ARCHIVE_BASE="flutterpatch-cli-${VERSION}-${OS}-${ARCH}"
+# Archive path relative to $OUT_DIR/stage — absolute Windows paths like
+# C:\... make tar treat "C:" as a remote host ("Cannot connect to C:").
 if [[ "$OS" == "windows" ]]; then
   ARCHIVE="$OUT_DIR/${ARCHIVE_BASE}.zip"
   rm -f "$ARCHIVE"
   # Prefer zip(1); fall back to Windows tar (GitHub Actions has no zip).
   if command -v zip >/dev/null 2>&1; then
-    (cd "$OUT_DIR/stage" && zip -qr "$ARCHIVE" flutterpatch)
+    (cd "$OUT_DIR/stage" && zip -qr "../${ARCHIVE_BASE}.zip" flutterpatch)
   else
-    (cd "$OUT_DIR/stage" && tar -a -cf "$ARCHIVE" flutterpatch)
+    (cd "$OUT_DIR/stage" && tar -a -cf "../${ARCHIVE_BASE}.zip" flutterpatch)
   fi
 else
   ARCHIVE="$OUT_DIR/${ARCHIVE_BASE}.tar.gz"
   rm -f "$ARCHIVE"
-  (cd "$OUT_DIR/stage" && tar -czf "$ARCHIVE" flutterpatch)
+  (cd "$OUT_DIR/stage" && tar -czf "../${ARCHIVE_BASE}.tar.gz" flutterpatch)
 fi
 
 echo "==> Done: $ARCHIVE"
