@@ -4,6 +4,9 @@
 # Usage:
 #   ./scripts/package_cli.sh [output_dir]
 #
+# Optional env:
+#   CLI_TARGET=windows-arm64   # overrides host OS/arch detection (used by CI)
+#
 # Produces:
 #   flutterpatch-cli-<version>-<os>-<arch>.zip|.tar.gz
 #
@@ -35,16 +38,60 @@ if [[ -z "${VERSION:-}" ]]; then
 fi
 FLUTTER_VERSION="$(tr -d '[:space:]' < "$ROOT/bin/internal/flutter.version")"
 
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-ARCH="$(uname -m)"
+# Normalize uname / Windows arch strings to x64|arm64.
+normalize_arch() {
+  case "$(echo "$1" | tr '[:upper:]' '[:lower:]')" in
+    x86_64|amd64|x64) echo x64 ;;
+    aarch64|arm64) echo arm64 ;;
+    *) echo "$1" ;;
+  esac
+}
+
+# Detect OS/arch of the machine we are packaging for.
+# On Windows ARM, Git Bash is often an x64 binary under emulation, so
+# `uname -m` reports x86_64 — prefer CLI_TARGET or native OS arch instead.
+if [[ -n "${CLI_TARGET:-}" ]]; then
+  OS="${CLI_TARGET%-*}"
+  ARCH="$(normalize_arch "${CLI_TARGET#*-}")"
+else
+  OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  case "$OS" in
+    darwin) OS=macos ;;
+    mingw*|msys*|cygwin*) OS=windows ;;
+  esac
+
+  ARCH=""
+  if [[ "$OS" == "windows" ]]; then
+    # RuntimeInformation.OSArchitecture is the host OS, not the current process.
+    WIN_ARCH="$(
+      powershell.exe -NoProfile -Command \
+        '[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()' \
+        2>/dev/null | tr -d '[:space:]' || true
+    )"
+    ARCH="$(normalize_arch "$WIN_ARCH")"
+  fi
+  case "$ARCH" in
+    x64|arm64) ;;
+    *) ARCH="$(normalize_arch "$(uname -m)")" ;;
+  esac
+fi
+
 case "$ARCH" in
-  x86_64|amd64) ARCH=x64 ;;
-  aarch64|arm64) ARCH=arm64 ;;
+  x64|arm64) ;;
+  *)
+    echo "Unsupported architecture: ${ARCH:-unknown} (CLI_TARGET=${CLI_TARGET:-})" >&2
+    exit 1
+    ;;
 esac
 case "$OS" in
-  darwin) OS=macos ;;
-  mingw*|msys*|cygwin*) OS=windows ;;
+  linux|macos|windows) ;;
+  *)
+    echo "Unsupported OS: ${OS:-unknown} (CLI_TARGET=${CLI_TARGET:-})" >&2
+    exit 1
+    ;;
 esac
+
+echo "==> Target: ${OS}-${ARCH}"
 
 STAGE="$OUT_DIR/stage/flutterpatch"
 rm -rf "$OUT_DIR/stage"

@@ -29,21 +29,27 @@ jobs:
         include:
           - target: linux-x64
             runner: ubuntu-latest
+            architecture: x64
             archive_ext: tar.gz
           - target: linux-arm64
             runner: ubuntu-24.04-arm
+            architecture: arm64
             archive_ext: tar.gz
           - target: macos-arm64
             runner: macos-latest
+            architecture: arm64
             archive_ext: tar.gz
           - target: macos-x64
             runner: macos-15-intel
+            architecture: x64
             archive_ext: tar.gz
           - target: windows-x64
             runner: windows-latest
+            architecture: x64
             archive_ext: zip
           - target: windows-arm64
             runner: windows-11-arm
+            architecture: arm64
             archive_ext: zip
 
     steps:
@@ -55,9 +61,14 @@ jobs:
         with:
           # Matches Flutter 3.47.2 (.fvmrc); needed for very_good_analysis ^10.3.0
           sdk: "3.13.2"
+          # Required on Windows ARM: Node/Git Bash are often x64 under emulation,
+          # so auto-detect would install an x64 Dart SDK.
+          architecture: ${{ matrix.architecture }}
 
       - name: Package CLI (Unix)
         if: runner.os != 'Windows'
+        env:
+          CLI_TARGET: ${{ matrix.target }}
         run: |
           chmod +x scripts/package_cli.sh
           ./scripts/package_cli.sh "$GITHUB_WORKSPACE/dist/cli"
@@ -65,6 +76,8 @@ jobs:
       - name: Package CLI (Windows)
         if: runner.os == 'Windows'
         shell: bash
+        env:
+          CLI_TARGET: ${{ matrix.target }}
         run: |
           chmod +x scripts/package_cli.sh
           ./scripts/package_cli.sh "$GITHUB_WORKSPACE/dist/cli"
