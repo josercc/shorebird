@@ -30,11 +30,20 @@ jobs:
           - target: linux-x64
             runner: ubuntu-latest
             archive_ext: tar.gz
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            archive_ext: tar.gz
           - target: macos-arm64
             runner: macos-latest
             archive_ext: tar.gz
+          - target: macos-x64
+            runner: macos-15-intel
+            archive_ext: tar.gz
           - target: windows-x64
             runner: windows-latest
+            archive_ext: zip
+          - target: windows-arm64
+            runner: windows-11-arm
             archive_ext: zip
 
     steps:
