@@ -152,16 +152,18 @@ Notes
 EOF
 
 ARCHIVE_BASE="flutterpatch-cli-${VERSION}-${OS}-${ARCH}"
-# Archive path relative to $OUT_DIR/stage — absolute Windows paths like
-# C:\... make tar treat "C:" as a remote host ("Cannot connect to C:").
 if [[ "$OS" == "windows" ]]; then
   ARCHIVE="$OUT_DIR/${ARCHIVE_BASE}.zip"
   rm -f "$ARCHIVE"
-  # Prefer zip(1); fall back to Windows tar (GitHub Actions has no zip).
+  # Prefer zip(1). Do NOT use Windows tar/bsdtar: absolute paths like
+  # D:\... are treated as remote hosts ("Cannot connect to D:"), and even
+  # relative -f names get resolved back to drive-letter paths.
   if command -v zip >/dev/null 2>&1; then
     (cd "$OUT_DIR/stage" && zip -qr "../${ARCHIVE_BASE}.zip" flutterpatch)
   else
-    (cd "$OUT_DIR/stage" && tar -a -cf "../${ARCHIVE_BASE}.zip" flutterpatch)
+    # PowerShell accepts mixed / and \ paths from GITHUB_WORKSPACE.
+    powershell.exe -NoProfile -Command \
+      "Compress-Archive -LiteralPath '${OUT_DIR//\'/\'\'}/stage/flutterpatch' -DestinationPath '${ARCHIVE//\'/\'\'}' -Force"
   fi
 else
   ARCHIVE="$OUT_DIR/${ARCHIVE_BASE}.tar.gz"
