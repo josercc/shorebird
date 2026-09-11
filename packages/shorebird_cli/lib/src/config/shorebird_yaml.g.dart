@@ -19,6 +19,8 @@ ShorebirdYaml _$ShorebirdYamlFromJson(Map json) => $checkedCreate(
         'flavors',
         'base_url',
         'patch_verification',
+        'upload_baselines',
+        'upload_patch_resources',
       ],
     );
     final val = ShorebirdYaml(
@@ -32,6 +34,14 @@ ShorebirdYaml _$ShorebirdYamlFromJson(Map json) => $checkedCreate(
         'patch_verification',
         (v) => $enumDecodeNullable(_$PatchVerificationEnumMap, v),
       ),
+      uploadBaselines: $checkedConvert(
+        'upload_baselines',
+        (v) => v as bool?,
+      ),
+      uploadPatchResources: $checkedConvert(
+        'upload_patch_resources',
+        (v) => v as bool?,
+      ),
     );
     return val;
   },
@@ -39,6 +49,8 @@ ShorebirdYaml _$ShorebirdYamlFromJson(Map json) => $checkedCreate(
     'appId': 'app_id',
     'baseUrl': 'base_url',
     'patchVerification': 'patch_verification',
+    'uploadBaselines': 'upload_baselines',
+    'uploadPatchResources': 'upload_patch_resources',
   },
 );
 
@@ -49,6 +61,8 @@ Map<String, dynamic> _$ShorebirdYamlToJson(
   'flavors': instance.flavors,
   'base_url': instance.baseUrl,
   'patch_verification': _$PatchVerificationEnumMap[instance.patchVerification],
+  'upload_baselines': instance.uploadBaselines,
+  'upload_patch_resources': instance.uploadPatchResources,
 };
 
 const _$PatchVerificationEnumMap = {

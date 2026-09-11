@@ -166,7 +166,8 @@ of the iOS app that is using this module. (aar and ios-framework only)''',
         negatable: false,
         help:
             'After a successful release, upload OTA snapshot and resource '
-            'baselines for this platform (scan-assets + check-ota snapshot).',
+            'baselines for this platform (scan-assets + check-ota snapshot). '
+            'Also enabled when shorebird.yaml has upload_baselines: true.',
       )
       ..addOption(
         'dd-max-bytes',
@@ -397,7 +398,10 @@ of the iOS app that is using this module. (aar and ios-framework only)''',
 ✅ Published Release ${release.version}!''')
           ..info(releaser.postReleaseInstructions);
 
-        if (results['upload-baselines'] == true) {
+        final shouldUploadBaselines =
+            results['upload-baselines'] == true ||
+            (shorebirdEnv.getShorebirdYaml()?.uploadBaselines ?? false);
+        if (shouldUploadBaselines) {
           await _uploadReleaseBaselines(
             appId: appId,
             releaseVersion: release.version,

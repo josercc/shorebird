@@ -115,7 +115,9 @@ To target the latest release (e.g. the release that was most recently updated) u
         'assets',
         help:
             'Current scan-assets JSON; with --baseline-assets, diffs are '
-            'uploaded as changed_resources on the patch.',
+            'uploaded as changed_resources on the patch. When omitted, '
+            'shorebird.yaml upload_patch_resources: true auto-scans and '
+            'diffs against the server baseline for this release version.',
       )
       ..addOption(
         'baseline-assets',
@@ -125,7 +127,10 @@ To target the latest release (e.g. the release that was most recently updated) u
       )
       ..addOption(
         'resource-number',
-        help: 'Associated version resource revision (resources.number).',
+        help:
+            'Associated version resource revision (resources.number). '
+            'With upload_patch_resources, defaults to the server baseline '
+            'revision when omitted.',
       )
       ..addFlag(
         'upload-assets',
@@ -617,6 +622,7 @@ Building patch with Flutter $flutterVersionString
         await patcher.uploadPatchArtifacts(
           appId: appId,
           releaseId: release.id,
+          releaseVersion: release.version,
           metadata: updateMetadata.toJson(),
           track: track,
           artifacts: patchArtifactBundles,

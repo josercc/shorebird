@@ -8,11 +8,13 @@ import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
 import 'package:shorebird_cli/src/code_signer.dart';
 import 'package:shorebird_cli/src/commands/commands.dart';
 import 'package:shorebird_cli/src/common_arguments.dart';
+import 'package:shorebird_cli/src/config/config.dart';
 import 'package:shorebird_cli/src/deployment_track.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/patch_diff_checker.dart';
 import 'package:shorebird_cli/src/platform/platform.dart';
 import 'package:shorebird_cli/src/release_type.dart';
+import 'package:shorebird_cli/src/shorebird_env.dart';
 import 'package:shorebird_cli/src/third_party/flutter_tools/lib/flutter_tools.dart';
 import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
 import 'package:test/test.dart';
@@ -193,9 +195,14 @@ void main() {
     group('uploadPatchArtifacts', () {
       test('calls codePushClientWrapper.publishPatch '
           'with correct args', () async {
-        final args = MockArgResults();
+        final argParser = ArgParser()
+          ..addOption('assets')
+          ..addOption('baseline-assets')
+          ..addOption('resource-number')
+          ..addFlag('upload-assets', defaultsTo: true);
+        final args = argParser.parse([]);
         final patcher = _TestPatcher(
-          argParser: MockArgParser(),
+          argParser: argParser,
           argResults: args,
           flavor: null,
           target: null,
@@ -207,6 +214,10 @@ void main() {
         const artifacts = <Arch, PatchArtifactBundle>{};
         const track = DeploymentTrack.stable;
         final codePushClientWrapper = MockCodePushClientWrapper();
+        final shorebirdEnv = MockShorebirdEnv();
+        when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(
+          const ShorebirdYaml(appId: appId),
+        );
         when(
           () => codePushClientWrapper.publishPatch(
             appId: any(named: 'appId'),
@@ -222,6 +233,7 @@ void main() {
             await patcher.uploadPatchArtifacts(
               appId: appId,
               releaseId: releaseId,
+              releaseVersion: '1.0.0+1',
               metadata: metadata,
               artifacts: artifacts,
               track: track,
@@ -229,6 +241,7 @@ void main() {
           },
           values: {
             codePushClientWrapperRef.overrideWith(() => codePushClientWrapper),
+            shorebirdEnvRef.overrideWith(() => shorebirdEnv),
           },
         );
         verify(

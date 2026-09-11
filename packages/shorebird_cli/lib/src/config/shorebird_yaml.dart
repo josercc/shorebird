@@ -24,6 +24,8 @@ class ShorebirdYaml {
     this.flavors,
     this.baseUrl,
     this.patchVerification,
+    this.uploadBaselines,
+    this.uploadPatchResources,
   });
 
   /// Creates a [ShorebirdYaml] from a JSON map.
@@ -57,6 +59,20 @@ class ShorebirdYaml {
 
   /// The patch verification mode for the app.
   final PatchVerification? patchVerification;
+
+  /// When `true`, `flutterpatch release` uploads OTA snapshot + resource
+  /// baselines for the released platform after a successful publish.
+  ///
+  /// Equivalent to passing `--upload-baselines` on the CLI.
+  final bool? uploadBaselines;
+
+  /// When `true`, `flutterpatch patch` scans local Flutter assets, diffs
+  /// against the server resource baseline for the target release version,
+  /// and attaches `changed_resources` (uploading add/update files) when
+  /// publishing the patch.
+  ///
+  /// Explicit `--assets` / `--baseline-assets` still take precedence.
+  final bool? uploadPatchResources;
 }
 
 /// Extension on [ShorebirdYaml] to get the app id for a specific flavor.

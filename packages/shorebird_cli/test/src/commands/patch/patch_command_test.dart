@@ -245,6 +245,7 @@ void main() {
         () => patcher.uploadPatchArtifacts(
           appId: any(named: 'appId'),
           releaseId: any(named: 'releaseId'),
+          releaseVersion: any(named: 'releaseVersion'),
           track: any(named: 'track'),
           artifacts: any(named: 'artifacts'),
           metadata: any(named: 'metadata'),
@@ -392,6 +393,7 @@ void main() {
           () => patcher.uploadPatchArtifacts(
             appId: appId,
             releaseId: any(named: 'releaseId'),
+            releaseVersion: any(named: 'releaseVersion'),
             metadata: any(named: 'metadata'),
             track: any(named: 'track'),
             artifacts: patchArtifactBundles,
@@ -1171,6 +1173,7 @@ void main() {
           () => patcher.uploadPatchArtifacts(
             appId: appId,
             releaseId: release.id,
+            releaseVersion: release.version,
             metadata: patchMetadata.toJson(),
             artifacts: any(named: 'artifacts'),
             track: DeploymentTrack.stable,
@@ -1378,6 +1381,7 @@ void main() {
             () => patcher.uploadPatchArtifacts(
               appId: appId,
               releaseId: release.id,
+              releaseVersion: release.version,
               metadata: any(named: 'metadata'),
               artifacts: any(named: 'artifacts'),
               track: DeploymentTrack.stable,
@@ -1579,6 +1583,7 @@ void main() {
           () => patcher.uploadPatchArtifacts(
             appId: appId,
             releaseId: release.id,
+            releaseVersion: release.version,
             metadata: any(named: 'metadata'),
             artifacts: any(named: 'artifacts'),
             track: DeploymentTrack.stable,
@@ -1770,6 +1775,7 @@ Please re-run the release command for this version or create a new release.'''),
           () => patcher.uploadPatchArtifacts(
             appId: appId,
             releaseId: release.id,
+            releaseVersion: release.version,
             metadata: any(named: 'metadata'),
             artifacts: any(named: 'artifacts'),
             track: DeploymentTrack.staging,

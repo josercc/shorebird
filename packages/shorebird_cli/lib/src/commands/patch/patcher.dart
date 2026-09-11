@@ -143,22 +143,24 @@ More info: ${troubleshootingUrl.toLink()}.
     required Map<String, dynamic> metadata,
     required Map<Arch, PatchArtifactBundle> artifacts,
     required DeploymentTrack track,
+    String? releaseVersion,
   }) async {
     List<Map<String, dynamic>>? changedResources;
     int? resourceNumber;
 
     final assetsPath = _optionalString('assets');
     final baselinePath = _optionalString('baseline-assets');
-    if (assetsPath != null &&
+    final hasExplicitAssetDiff =
+        assetsPath != null &&
         assetsPath.isNotEmpty &&
         baselinePath != null &&
-        baselinePath.isNotEmpty) {
+        baselinePath.isNotEmpty;
+
+    if (hasExplicitAssetDiff) {
       final next = loadScannedAssetsFromFile(assetsPath);
       final baseline = loadScannedAssetsFromFile(baselinePath);
       var changes = diffScannedAssets(baseline: baseline, next: next);
-      final uploadAssets = !argResults.options.contains('upload-assets') ||
-          argResults['upload-assets'] != false;
-      if (changes.isNotEmpty && uploadAssets) {
+      if (changes.isNotEmpty && _shouldUploadChangedAssets) {
         logger.info('Uploading changed Flutter assets to control plane…');
         changes = await uploadChangedResourcesToControl(
           appDir: Directory.current.path,
@@ -170,6 +172,18 @@ More info: ${troubleshootingUrl.toLink()}.
       changedResources = [
         for (final c in changes) Map<String, dynamic>.from(c),
       ];
+    } else if ((shorebirdEnv.getShorebirdYaml()?.uploadPatchResources ??
+            false) &&
+        releaseVersion != null &&
+        releaseVersion.isNotEmpty) {
+      final auto = await _resolveAutoPatchResources(
+        appId: appId,
+        releaseVersion: releaseVersion,
+      );
+      if (auto != null) {
+        changedResources = auto.changedResources;
+        resourceNumber = auto.resourceNumber;
+      }
     }
 
     final resNumRaw = _optionalString('resource-number');
@@ -187,6 +201,79 @@ More info: ${troubleshootingUrl.toLink()}.
       changedResources: changedResources,
       resourceNumber: resourceNumber,
     );
+  }
+
+  bool get _shouldUploadChangedAssets =>
+      !argResults.options.contains('upload-assets') ||
+      argResults['upload-assets'] != false;
+
+  /// Scans local assets, diffs against the server resource baseline for
+  /// [releaseVersion], and optionally uploads add/update files.
+  Future<({List<Map<String, dynamic>> changedResources, int? resourceNumber})?>
+  _resolveAutoPatchResources({
+    required String appId,
+    required String releaseVersion,
+  }) async {
+    final progress = logger.progress(
+      'Resolving resource changes for $releaseVersion',
+    );
+    try {
+      final platform = releaseType.releasePlatform.name;
+      final client = codePushClientWrapper.codePushClient;
+      final baseline = await fetchServerBaseline(
+        client: client,
+        appId: appId,
+        releaseVersion: releaseVersion,
+        platform: platform,
+      );
+      if (baseline.resourceAssets.isEmpty) {
+        progress.fail(
+          'No server resource baseline for $releaseVersion ($platform); '
+          'skipping changed_resources. Run flutterpatch upload-resources '
+          'after release, or set upload_baselines: true.',
+        );
+        return null;
+      }
+
+      final scanned = await scanFlutterAssets(
+        appDir: Directory.current.path,
+        releaseVersion: releaseVersion,
+      );
+      var changes = diffScannedAssets(
+        baseline: baseline.resourceAssets,
+        next: scanned.resources,
+      );
+      if (changes.isNotEmpty && _shouldUploadChangedAssets) {
+        logger.info('Uploading changed Flutter assets to control plane…');
+        changes = await uploadChangedResourcesToControl(
+          appDir: Directory.current.path,
+          changes: changes,
+          client: client,
+          onLog: logger.detail,
+        );
+      }
+
+      progress.complete(
+        changes.isEmpty
+            ? 'No resource changes vs server baseline '
+                  '#${baseline.resourceNumber}'
+            : 'Prepared ${changes.length} resource change(s) vs baseline '
+                  '#${baseline.resourceNumber}',
+      );
+      return (
+        changedResources: [
+          for (final c in changes) Map<String, dynamic>.from(c),
+        ],
+        resourceNumber: baseline.resourceNumber,
+      );
+    } on Exception catch (error) {
+      progress.fail('Failed to resolve patch resource changes: $error');
+      logger.info(
+        'Continuing patch publish without changed_resources. '
+        'Re-run with --assets / --baseline-assets if needed.',
+      );
+      return null;
+    }
   }
 
   /// Whether to allow changes in assets (--allow-asset-diffs).

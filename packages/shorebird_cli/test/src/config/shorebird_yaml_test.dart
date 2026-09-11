@@ -117,6 +117,34 @@ patch_verification: invalid_value
       );
     });
 
+    test('can be deserialized with upload_baselines and upload_patch_resources',
+        () {
+      const yaml = '''
+app_id: test_app_id
+upload_baselines: true
+upload_patch_resources: true
+''';
+      final shorebirdYaml = checkedYamlDecode(
+        yaml,
+        (m) => ShorebirdYaml.fromJson(m!),
+      );
+      expect(shorebirdYaml.appId, 'test_app_id');
+      expect(shorebirdYaml.uploadBaselines, isTrue);
+      expect(shorebirdYaml.uploadPatchResources, isTrue);
+    });
+
+    test('defaults upload_baselines and upload_patch_resources to null', () {
+      const yaml = '''
+app_id: test_app_id
+''';
+      final shorebirdYaml = checkedYamlDecode(
+        yaml,
+        (m) => ShorebirdYaml.fromJson(m!),
+      );
+      expect(shorebirdYaml.uploadBaselines, isNull);
+      expect(shorebirdYaml.uploadPatchResources, isNull);
+    });
+
     group('AppIdExtension', () {
       test('getAppId returns base app id when no flavor is provided', () {
         const shorebirdYaml = ShorebirdYaml(appId: 'test_app_id');

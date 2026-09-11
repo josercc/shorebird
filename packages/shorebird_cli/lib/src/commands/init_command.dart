@@ -415,6 +415,12 @@ app_id:
 
 # control_api base URL (required for CLI + device updater).
 base_url:
+
+# After release: upload OTA snapshot + resource baselines for the platform.
+# upload_baselines: true
+
+# After patch: diff local assets vs server baseline and push changed_resources.
+# upload_patch_resources: true
 ''';
 
     final editor = YamlEditor(content)
