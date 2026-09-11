@@ -29,6 +29,9 @@
 #   FLUTTERPATCH_CLI_URL              direct archive URL (skips catalog)
 #   FLUTTERPATCH_FLUTTER_GIT_URL      Flutter fork git URL
 #   FLUTTERPATCH_ENGINE_CDN           engine CDN (default: download.shorebird.dev)
+#   FLUTTERPATCH_CURL_USE_PROXY       set to 1 to honor http(s)_proxy for CLI
+#                                     downloads (default: bypass; Clash/V2Ray
+#                                     often leave keep-alive open → curl 28)
 #   FLUTTER_STORAGE_BASE_URL          ignored during install (unset; China Flutter
 #                                     mirrors do not host Shorebird engines)
 set -euo pipefail
@@ -112,10 +115,6 @@ need_cmd tar
 need_cmd uname
 need_cmd mktemp
 
-if [[ -z "$ARCHIVE" ]]; then
-  need_cmd python3
-fi
-
 install_dir() {
   if [[ -n "${FLUTTERPATCH_ROOT:-}" ]]; then
     printf '%s' "${FLUTTERPATCH_ROOT}"
@@ -159,30 +158,183 @@ downloads_project() {
   printf '%s' "${FLUTTERPATCH_DOWNLOADS_PROJECT_ID:-${FLUTTERPATCH_DOWNLOADS_PROJECT:-$_DEFAULT_DOWNLOADS_PROJECT}}"
 }
 
-# Resolve catalog → print: url\tversion\tsha256\tfilename
-resolve_from_catalog() {
-  local os="$1" arch="$2" want_version="$3"
-  local endpoint project payload resp
-  endpoint="$(downloads_endpoint)"
-  project="$(downloads_project)"
-  if [[ -z "$endpoint" || -z "$project" ]]; then
-    echo "Error: set FLUTTERPATCH_DOWNLOADS_ENDPOINT and FLUTTERPATCH_DOWNLOADS_PROJECT_ID, or pass --url / --archive." >&2
-    return 1
+# Local Clash/V2Ray proxies (http_proxy=127.0.0.1:7890) often proxy the Appwrite
+# response then keep the socket open without Content-Length → curl hangs until
+# --max-time and exits 28 even after the full body arrived. Bypass proxy unless
+# the user explicitly opts in.
+# Run curl with default proxy bypass for FlutterPatch download hosts.
+# Usage: curl_fp [curl args...]
+curl_fp() {
+  if [[ "${FLUTTERPATCH_CURL_USE_PROXY:-}" == "1" ]]; then
+    curl "$@"
+    return $?
+  fi
+  # --proxy "" disables env http(s)_proxy for this request.
+  curl --proxy "" --noproxy "*" "$@"
+  return $?
+}
+
+warn_if_proxy_set() {
+  if [[ "${FLUTTERPATCH_CURL_USE_PROXY:-}" == "1" ]]; then
+    return 0
+  fi
+  if [[ -n "${http_proxy:-}${HTTP_PROXY:-}${https_proxy:-}${HTTPS_PROXY:-}${ALL_PROXY:-}${all_proxy:-}" ]]; then
+    echo "  note: bypassing http(s)_proxy for FlutterPatch downloads (set FLUTTERPATCH_CURL_USE_PROXY=1 to keep proxy)" >&2
+  fi
+}
+
+# Run a command with a wall-clock timeout (macOS has no GNU timeout by default).
+run_with_timeout() {
+  local secs="$1"
+  shift
+  "$@" &
+  local pid=$!
+  local waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( waited >= secs )); then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid"
+}
+
+# macOS /usr/bin/python3 is often a CLT stub that hangs on a GUI prompt.
+python3_is_usable() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  run_with_timeout 5 python3 -c 'print("ok")' >/dev/null 2>&1
+}
+
+# Parse catalog JSON file → print: url\tversion\tsha256\tfilename
+# Prefer jq, then macOS JXA (no CLT/python), then a real python3.
+parse_catalog_file() {
+  local catalog_file="$1" os_name="$2" arch="$3" want_version="$4"
+
+  if command -v jq >/dev/null 2>&1; then
+    jq -r --arg os "$os_name" --arg arch "$arch" --arg want "$want_version" '
+      (if (.responseBody | type) == "string" then (.responseBody | fromjson) else . end) as $d
+      | if ($d | type) != "object" or $d.ok == false then
+          error("catalog request failed")
+        else
+          ($d.cli // [])
+          | map(select(
+              ((.platform // "") | ascii_downcase) == $os
+              and (
+                ((.arch // "") | ascii_downcase) == $arch
+                or ($arch == "x64" and (((.arch // "") | ascii_downcase) == "amd64"
+                    or ((.arch // "") | ascii_downcase) == "x86_64"))
+              )
+              and (
+                $want == ""
+                or (((.version // "") | ltrimstr("v") | ltrimstr("V"))
+                    == ($want | ltrimstr("v") | ltrimstr("V")))
+              )
+            ))
+          | if length == 0 then
+              error("no CLI package for \($os)-\($arch)")
+            else
+              sort_by(
+                ((.version // "") | ltrimstr("v") | ltrimstr("V") | gsub("-"; ".") | split(".")
+                  | map(tonumber? // .))
+              )
+              | reverse
+              | .[0]
+              | [
+                  (.download_url // ""),
+                  (.version // ""),
+                  ((.sha256 // "") | ascii_downcase),
+                  (.filename // "")
+                ]
+              | @tsv
+            end
+        end
+    ' "$catalog_file"
+    return $?
   fi
 
-  payload='{"action":"list_cli"}'
-  resp="$(curl -fsSL \
-    -H "Content-Type: application/json" \
-    -H "X-Appwrite-Project: ${project}" \
-    -d "$payload" \
-    "$endpoint")"
+  # macOS ships osascript/JXA; avoids /usr/bin/python3 CLT stub hangs on Intel Macs.
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v osascript >/dev/null 2>&1; then
+    CATALOG_FILE="$catalog_file" OS_NAME="$os_name" ARCH_NAME="$arch" WANT_VERSION="$want_version" \
+      osascript -l JavaScript <<'JS'
+ObjC.import('Foundation');
+function env(name) {
+  const v = $.NSProcessInfo.processInfo.environment.objectForKey(name);
+  return v ? ObjC.unwrap(v) : '';
+}
+function readUtf8(path) {
+  const ns = $.NSString.stringWithContentsOfFileEncodingError(
+    $(path), $.NSUTF8StringEncoding, null);
+  if (!ns) throw new Error('cannot read catalog file: ' + path);
+  return ObjC.unwrap(ns);
+}
+function verKey(v) {
+  return String(v || '').replace(/^[vV]/, '').replace(/-/g, '.').split('.').map(function (p) {
+    return /^\d+$/.test(p) ? Number(p) : p;
+  });
+}
+function verCmp(a, b) {
+  const aa = verKey(a), bb = verKey(b);
+  const n = Math.max(aa.length, bb.length);
+  for (let i = 0; i < n; i++) {
+    const x = aa[i], y = bb[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    if (x === y) continue;
+    if (typeof x === 'number' && typeof y === 'number') return x < y ? -1 : 1;
+    return String(x) < String(y) ? -1 : 1;
+  }
+  return 0;
+}
+const path = env('CATALOG_FILE');
+const osName = env('OS_NAME');
+const arch = env('ARCH_NAME');
+const want = env('WANT_VERSION');
+let data = JSON.parse(readUtf8(path));
+if (data && typeof data.responseBody === 'string') {
+  try { data = JSON.parse(data.responseBody); } catch (e) {}
+}
+if (!data || typeof data !== 'object' || data.ok === false) {
+  throw new Error('catalog request failed');
+}
+const archSet = {};
+archSet[arch] = true;
+if (arch === 'x64') { archSet.amd64 = true; archSet.x86_64 = true; }
+const wantN = String(want || '').replace(/^[vV]/, '');
+let candidates = (data.cli || []).filter(function (r) {
+  const p = String(r.platform || '').toLowerCase();
+  const a = String(r.arch || '').toLowerCase();
+  if (p !== osName || !archSet[a]) return false;
+  if (!wantN) return true;
+  return String(r.version || '').replace(/^[vV]/, '') === wantN;
+});
+if (!candidates.length) {
+  throw new Error('no CLI package for ' + osName + '-' + arch + (want ? (' version ' + want) : ''));
+}
+candidates.sort(function (a, b) { return verCmp(b.version, a.version); });
+const row = candidates[0];
+const url = String(row.download_url || '').trim();
+if (!url) throw new Error('catalog row missing download_url');
+// Final expression is written to stdout by osascript (console.log goes to stderr).
+[
+  url,
+  String(row.version || '').trim(),
+  String(row.sha256 || '').trim().toLowerCase(),
+  String(row.filename || '').trim()
+].join('\t');
+JS
+    return $?
+  fi
 
-  python3 - "$resp" "$os" "$arch" "$want_version" <<'PY'
+  if python3_is_usable; then
+    python3 - "$catalog_file" "$os_name" "$arch" "$want_version" <<'PY'
 import json, sys
 
-raw, os_name, arch, want = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-data = json.loads(raw)
-# Appwrite Function wrapper may nest JSON in responseBody.
+path, os_name, arch, want = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+with open(path, "r", encoding="utf-8") as f:
+    data = json.load(f)
 if isinstance(data, dict) and isinstance(data.get("responseBody"), str):
     try:
         data = json.loads(data["responseBody"])
@@ -192,10 +344,13 @@ if not isinstance(data, dict) or data.get("ok") is False:
     print(f"Error: catalog request failed: {data}", file=sys.stderr)
     sys.exit(1)
 rows = data.get("cli") or []
+arch_ok = {arch}
+if arch == "x64":
+    arch_ok.update({"amd64", "x86_64"})
 candidates = [
     r for r in rows
     if str(r.get("platform", "")).lower() == os_name
-    and str(r.get("arch", "")).lower() in {arch, "amd64" if arch == "x64" else arch, "x86_64" if arch == "x64" else arch}
+    and str(r.get("arch", "")).lower() in arch_ok
 ]
 if want:
     want_n = want.lstrip("vV")
@@ -227,6 +382,93 @@ print("\t".join([
     str(row.get("filename") or "").strip(),
 ]))
 PY
+    return $?
+  fi
+
+  echo "Error: cannot parse download catalog (need jq, or macOS osascript, or a working python3)." >&2
+  echo "  macOS tip: /usr/bin/python3 may hang waiting for Xcode CLT — use:" >&2
+  echo "    xcode-select --install   # or: brew install python jq" >&2
+  echo "  Or skip catalog: ./install_cli.sh --url <archive-url>" >&2
+  return 1
+}
+
+# True if file looks like a usable Appwrite / catalog JSON payload.
+catalog_file_usable() {
+  local f="$1"
+  [[ -s "$f" ]] || return 1
+  # Minimal structural check — full parse happens later.
+  grep -q '"cli"' "$f" 2>/dev/null || return 1
+  grep -qE '"ok"[[:space:]]*:[[:space:]]*true|"responseBody"' "$f" 2>/dev/null
+}
+
+# Resolve catalog → print: url\tversion\tsha256\tfilename
+resolve_from_catalog() {
+  local os="$1" arch="$2" want_version="$3"
+  local endpoint project payload catalog_file curl_rc=0
+  local attempt=1 max_attempts=3
+  endpoint="$(downloads_endpoint)"
+  project="$(downloads_project)"
+  if [[ -z "$endpoint" || -z "$project" ]]; then
+    echo "Error: set FLUTTERPATCH_DOWNLOADS_ENDPOINT and FLUTTERPATCH_DOWNLOADS_PROJECT_ID, or pass --url / --archive." >&2
+    return 1
+  fi
+
+  catalog_file="$(mktemp "${TMPDIR:-/tmp}/flutterpatch-catalog.XXXXXX")"
+
+  payload='{"action":"list_cli"}'
+  echo "  fetching catalog from $endpoint …" >&2
+  warn_if_proxy_set
+  # Some Appwrite / local-proxy paths deliver the full body then leave the
+  # socket open (curl exit 28 with N bytes received). Prefer Connection: close
+  # and bypass http_proxy by default. Accept a usable JSON body even if curl
+  # later times out (exit 28).
+  while (( attempt <= max_attempts )); do
+    : >"$catalog_file"
+    set +e
+    curl_fp -fsS \
+      --connect-timeout 15 \
+      --max-time 60 \
+      --retry 0 \
+      -H "Content-Type: application/json" \
+      -H "Connection: close" \
+      -H "X-Appwrite-Project: ${project}" \
+      -d "$payload" \
+      -o "$catalog_file" \
+      "$endpoint"
+    curl_rc=$?
+    set -e
+
+    if [[ "$curl_rc" -eq 0 ]] || catalog_file_usable "$catalog_file"; then
+      if [[ "$curl_rc" -ne 0 ]]; then
+        echo "  warning: catalog curl exited $curl_rc after receiving a usable body; continuing…" >&2
+      fi
+      break
+    fi
+
+    echo "  catalog fetch attempt $attempt/$max_attempts failed (curl exit $curl_rc)" >&2
+    if (( attempt == max_attempts )); then
+      rm -f "$catalog_file"
+      echo "Error: failed to fetch download catalog from $endpoint (curl exit $curl_rc)" >&2
+      echo "  Often caused by http_proxy (e.g. 127.0.0.1:7890) holding the connection open." >&2
+      echo "  Retry without proxy:" >&2
+      echo "    env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \\" >&2
+      echo "      curl --connect-timeout 10 --max-time 30 -o /tmp/fp-catalog.json \\" >&2
+      echo "      -H 'Content-Type: application/json' -H 'X-Appwrite-Project: $project' \\" >&2
+      echo "      -d '{\"action\":\"list_cli\"}' '$endpoint'" >&2
+      echo "  Or: NO_PROXY='*' ./install_cli.sh --force" >&2
+      echo "  Or: ./install_cli.sh --url <archive-url> / --archive /path/to.tgz" >&2
+      return 1
+    fi
+    sleep $((attempt * 2))
+    attempt=$((attempt + 1))
+  done
+
+  echo "  parsing catalog for ${os}-${arch}…" >&2
+  if ! parse_catalog_file "$catalog_file" "$os" "$arch" "$want_version"; then
+    rm -f "$catalog_file"
+    return 1
+  fi
+  rm -f "$catalog_file"
 }
 
 add_to_path() {
@@ -524,10 +766,15 @@ if [[ "$SKIP_CLI_PACKAGE" != true ]]; then
       *) ARCHIVE_PATH="$WORKDIR/cli.tar.gz" ;;
     esac
     echo "Downloading $CLI_URL …"
-    curl -fL --progress-bar -o "$ARCHIVE_PATH" "$CLI_URL"
+    warn_if_proxy_set
+    curl_fp -fL --connect-timeout 15 --max-time 600 --progress-bar -o "$ARCHIVE_PATH" "$CLI_URL"
   else
     echo "Resolving latest package from download catalog…"
     IFS=$'\t' read -r url resolved_version resolved_sha resolved_name < <(resolve_from_catalog "$OS" "$ARCH" "$VERSION")
+    if [[ -z "${url:-}" ]]; then
+      echo "Error: catalog resolve returned an empty download URL" >&2
+      exit 1
+    fi
     RESOLVED_VERSION="$resolved_version"
     RESOLVED_SHA="$resolved_sha"
     case "${resolved_name:-$url}" in
@@ -535,7 +782,8 @@ if [[ "$SKIP_CLI_PACKAGE" != true ]]; then
       *) ARCHIVE_PATH="$WORKDIR/cli.tar.gz" ;;
     esac
     echo "Downloading FlutterPatch CLI ${RESOLVED_VERSION:-} (${OS}-${ARCH})…"
-    curl -fL --progress-bar -o "$ARCHIVE_PATH" "$url"
+    warn_if_proxy_set
+    curl_fp -fL --connect-timeout 15 --max-time 600 --progress-bar -o "$ARCHIVE_PATH" "$url"
     verify_sha256 "$ARCHIVE_PATH" "$RESOLVED_SHA"
   fi
 
