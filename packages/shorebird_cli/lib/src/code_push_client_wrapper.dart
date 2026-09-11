@@ -14,6 +14,7 @@ import 'package:scoped_deps/scoped_deps.dart';
 import 'package:shorebird_cli/src/archive/directory_archive.dart';
 import 'package:shorebird_cli/src/artifact_manager.dart';
 import 'package:shorebird_cli/src/auth/auth.dart';
+import 'package:shorebird_cli/src/cache.dart';
 import 'package:shorebird_cli/src/deployment_track.dart';
 import 'package:shorebird_cli/src/executables/executables.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
@@ -81,6 +82,7 @@ ScopedRef<CodePushClientWrapper> codePushClientWrapperRef = create(() {
       httpClient: auth.client,
       hostedUri: hostedUri,
       customHeaders: {'x-cli-version': packageVersion},
+      artifactCacheRoot: Cache.shorebirdFlutterpatchDirectory,
     ),
   );
 });
@@ -1015,8 +1017,7 @@ ${sourceArtifact.arch} artifact already exists, continuing...''');
         _handleErrorAndExit(
           error,
           progress: cloneProgress,
-          message:
-              'Error cloning ${sourceArtifact.arch} artifact: $error',
+          message: 'Error cloning ${sourceArtifact.arch} artifact: $error',
         );
       }
     }
@@ -1270,8 +1271,7 @@ ${sourceArtifact.arch} artifact already exists, continuing...''');
 
     await promotePatch(appId: appId, patchId: patch.id, channel: channel);
 
-    final number =
-        codePushClient.patchNumberFor(patch.id) ?? patch.number;
+    final number = codePushClient.patchNumberFor(patch.id) ?? patch.number;
     logger.success('\n✅ Published Patch $number!');
   }
 

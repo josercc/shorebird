@@ -110,6 +110,12 @@ class Cache {
     return Directory(p.join(shorebirdCacheDirectory.path, 'previews'));
   }
 
+  /// FlutterPatch release / OTA / patch artifact cache
+  /// (`bin/cache/flutterpatch`).
+  static Directory get shorebirdFlutterpatchDirectory {
+    return Directory(p.join(shorebirdCacheDirectory.path, 'flutterpatch'));
+  }
+
   /// The Shorebird cached artifacts directory.
   static Directory get shorebirdArtifactsDirectory {
     return Directory(p.join(shorebirdCacheDirectory.path, 'artifacts'));

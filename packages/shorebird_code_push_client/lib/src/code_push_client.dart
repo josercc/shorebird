@@ -9,8 +9,8 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:meta/meta.dart';
-import 'package:path/path.dart' as p;
 import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
+import 'package:shorebird_code_push_client/src/local_artifact_cache.dart';
 import 'package:shorebird_code_push_client/src/version.dart';
 import 'package:shorebird_code_push_protocol/shorebird_code_push_protocol.dart';
 
@@ -121,11 +121,17 @@ class _CachedRelease {
 /// Dart client for the FlutterPatch control_api (Shorebird CLI-compatible API).
 class CodePushClient {
   /// Creates a client pointed at FlutterPatch control_api by default.
+  ///
+  /// [artifactCacheRoot] defaults to
+  /// `{systemTemp}/flutterpatch_artifact_cache`. The CLI injects
+  /// `{shorebirdRoot}/bin/cache/flutterpatch`.
   CodePushClient({
     http.Client? httpClient,
     Uri? hostedUri,
     Map<String, String>? customHeaders,
-    @visibleForTesting Duration uploadRetryBaseDelay = const Duration(seconds: 1),
+    Directory? artifactCacheRoot,
+    @visibleForTesting
+    Duration uploadRetryBaseDelay = const Duration(seconds: 1),
   }) : _httpClient = _CodePushHttpClient(httpClient ?? http.Client(), {
          ...standardHeaders,
          ...?customHeaders,
@@ -134,7 +140,8 @@ class CodePushClient {
            hostedUri ??
            (throw ArgumentError(
              'hostedUri is required. Set base_url in shorebird.yaml.',
-           )) {
+           )),
+       _artifactCache = LocalArtifactCache(root: artifactCacheRoot) {
     assert(uploadRetryBaseDelay > Duration.zero);
   }
 
@@ -150,6 +157,8 @@ class CodePushClient {
 
   /// Base URI for control_api.
   final Uri hostedUri;
+
+  final LocalArtifactCache _artifactCache;
 
   Uri get _admin => Uri.parse('$hostedUri/admin/v1');
 
@@ -326,6 +335,24 @@ class CodePushClient {
     _idToUuid.putIfAbsent(patchId, () => uuid);
     _uuidToId[uuid] = patchId;
     pending.number = (created['number'] as num?)?.toInt() ?? pending.number;
+    final number = pending.number;
+    if (number != null) {
+      await _artifactCache.write(
+        file: _artifactCache.patchFile(
+          appId: appId,
+          version: pending.releaseVersion,
+          platform: platform.name,
+          arch: arch,
+          number: number,
+        ),
+        bytes: bytes,
+        meta: {
+          'hash': hash,
+          'size': bytes.length,
+          'patch_id': uuid,
+        },
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -359,10 +386,25 @@ class CodePushClient {
       }),
     );
     if (!response.isSuccess) _throw(response);
-    return _json(response);
+    final created = await _json(response);
+    final id = created['id']?.toString();
+    if (id != null && id.isNotEmpty) {
+      await _artifactCache.write(
+        file: _artifactCache.resourceFile(id),
+        bytes: contentBytes,
+        meta: {
+          'hash': hash,
+          'size': contentBytes.length,
+          'app_id': appId,
+          'version': releaseVersion,
+          if (platform != null && platform.isNotEmpty) 'platform': platform,
+          'number': created['number'],
+        },
+      );
+    }
+    return created;
   }
 
-  /// Lists resource snapshots for an app/version.
   Future<List<Map<String, dynamic>>> listResourceSnapshots({
     required String appId,
     String? releaseVersion,
@@ -388,11 +430,25 @@ class CodePushClient {
 
   /// Downloads resource snapshot JSON bytes by id.
   Future<List<int>> getResourceSnapshotContent(String id) async {
+    final cached = await _artifactCache.tryRead(
+      _artifactCache.resourceFile(id),
+    );
+    if (cached != null) return cached.bytes;
+
     final response = await _httpClient.get(
       Uri.parse('$_admin/resources/$id/content'),
     );
     if (!response.isSuccess) _throw(response);
-    return response.bodyBytes;
+    final bytes = response.bodyBytes;
+    await _artifactCache.write(
+      file: _artifactCache.resourceFile(id),
+      bytes: bytes,
+      meta: {
+        'hash': sha256.convert(bytes).toString(),
+        'size': bytes.length,
+      },
+    );
+    return bytes;
   }
 
   /// Uploads an OTA eligibility snapshot (`POST /admin/v1/snapshots`).
@@ -421,7 +477,23 @@ class CodePushClient {
       }),
     );
     if (!response.isSuccess) _throw(response);
-    return _json(response);
+    final created = await _json(response);
+    final id = created['id']?.toString();
+    if (id != null && id.isNotEmpty) {
+      await _artifactCache.write(
+        file: _artifactCache.snapshotFile(id),
+        bytes: contentBytes,
+        meta: {
+          'hash': hash,
+          'size': contentBytes.length,
+          'app_id': appId,
+          'version': releaseVersion,
+          if (platform != null && platform.isNotEmpty) 'platform': platform,
+          'number': created['number'],
+        },
+      );
+    }
+    return created;
   }
 
   /// Lists OTA snapshots for an app/version.
@@ -450,11 +522,25 @@ class CodePushClient {
 
   /// Downloads OTA snapshot JSON bytes by id.
   Future<List<int>> getOtaSnapshotContent(String id) async {
+    final cached = await _artifactCache.tryRead(
+      _artifactCache.snapshotFile(id),
+    );
+    if (cached != null) return cached.bytes;
+
     final response = await _httpClient.get(
       Uri.parse('$_admin/snapshots/$id/content'),
     );
     if (!response.isSuccess) _throw(response);
-    return response.bodyBytes;
+    final bytes = response.bodyBytes;
+    await _artifactCache.write(
+      file: _artifactCache.snapshotFile(id),
+      bytes: bytes,
+      meta: {
+        'hash': sha256.convert(bytes).toString(),
+        'size': bytes.length,
+      },
+    );
+    return bytes;
   }
 
   /// Looks up a content-addressed asset by sha256. Returns null on 404.
@@ -567,8 +653,7 @@ class CodePushClient {
         if (storagePath.isNotEmpty) 'artifact_path': storagePath,
         if (cached.flutterRevision.isNotEmpty)
           'flutter_revision': cached.flutterRevision,
-        if (cached.flutterVersion != null &&
-            cached.flutterVersion!.isNotEmpty)
+        if (cached.flutterVersion != null && cached.flutterVersion!.isNotEmpty)
           'flutter_version': cached.flutterVersion,
       }),
     );
@@ -580,7 +665,9 @@ class CodePushClient {
       _uuidToId[uuid] = releaseId;
     }
 
-    final resolvedHash = hash.isNotEmpty ? hash : sha256.convert(bytes).toString();
+    final resolvedHash = hash.isNotEmpty
+        ? hash
+        : sha256.convert(bytes).toString();
     final cachedFile = await _writeReleaseArtifactCache(
       appId: appId,
       version: cached.version,
@@ -769,9 +856,11 @@ class CodePushClient {
       final cachedRevision = cached?.flutterRevision.trim() ?? '';
       final cachedRevisionKnown =
           cachedRevision.isNotEmpty && cachedRevision != 'flutterpatch';
-      final resolvedRevision =
-          cachedRevisionKnown ? cachedRevision : (apiRevision ?? '');
-      final resolvedFlutterVersion = cached?.flutterVersion ?? apiFlutterVersion;
+      final resolvedRevision = cachedRevisionKnown
+          ? cachedRevision
+          : (apiRevision ?? '');
+      final resolvedFlutterVersion =
+          cached?.flutterVersion ?? apiFlutterVersion;
       final release = Release(
         id: id,
         appId: appId,
@@ -915,6 +1004,49 @@ class CodePushClient {
       }
     }
 
+    Future<bool> hydrateFromDisk({
+      required String platformName,
+      required String rowArch,
+      required ReleasePlatform rowPlatform,
+      String? expectedStoragePath,
+    }) async {
+      final key = '$platformName:$rowArch';
+      if (cached.artifacts.containsKey(key)) return true;
+      final disk = await _artifactCache.tryReadRelease(
+        appId: appId,
+        version: cached.version,
+        platform: platformName,
+        arch: rowArch,
+      );
+      if (disk == null) return false;
+
+      final metaPath = disk.meta['storage_path'] as String?;
+      if (expectedStoragePath != null &&
+          expectedStoragePath.isNotEmpty &&
+          metaPath != null &&
+          metaPath.isNotEmpty &&
+          metaPath != expectedStoragePath) {
+        await _artifactCache.invalidate(disk.file);
+        return false;
+      }
+
+      cached.artifacts[key] = _releaseArtifactFromDisk(
+        releaseId: releaseId,
+        arch: rowArch,
+        platform: rowPlatform,
+        cachedFile: disk,
+      );
+      return true;
+    }
+
+    if (platform != null && arch != null) {
+      await hydrateFromDisk(
+        platformName: platform.name,
+        rowArch: arch,
+        rowPlatform: platform,
+      );
+    }
+
     final missing = <String>{};
     if (platform != null && arch != null) {
       final key = '${platform.name}:$arch';
@@ -954,6 +1086,14 @@ class CodePushClient {
         continue;
       }
 
+      final fromDisk = await hydrateFromDisk(
+        platformName: platformName,
+        rowArch: rowArch,
+        rowPlatform: rowPlatform,
+        expectedStoragePath: storagePath,
+      );
+      if (fromDisk) continue;
+
       final bytes = await _downloadAdminArtifact(storagePath);
       final hash = sha256.convert(bytes).toString();
       final cachedFile = await _writeReleaseArtifactCache(
@@ -980,6 +1120,28 @@ class CodePushClient {
     }
   }
 
+  ReleaseArtifact _releaseArtifactFromDisk({
+    required int releaseId,
+    required String arch,
+    required ReleasePlatform platform,
+    required CachedArtifactFile cachedFile,
+  }) {
+    final hash =
+        (cachedFile.meta['hash'] as String?) ??
+        sha256.convert(cachedFile.bytes).toString();
+    return ReleaseArtifact(
+      id: _nextId++,
+      releaseId: releaseId,
+      arch: arch,
+      platform: platform,
+      hash: hash,
+      size: cachedFile.bytes.length,
+      url: cachedFile.file.uri.toString(),
+      canSideload: _isSideloadableArch(arch),
+      podfileLockHash: null,
+    );
+  }
+
   Future<List<int>> _downloadAdminArtifact(String storagePath) async {
     final uri = Uri.parse('$_admin/artifacts/$storagePath');
     final response = await _httpClient.get(uri);
@@ -995,28 +1157,21 @@ class CodePushClient {
     required List<int> bytes,
     required String hash,
     required String storagePath,
-  }) async {
-    final cacheRoot = Directory(
-      p.join(
-        Directory.systemTemp.path,
-        'flutterpatch_release_cache',
-        appId,
-        version,
+  }) {
+    return _artifactCache.write(
+      file: _artifactCache.releaseFile(
+        appId: appId,
+        version: version,
+        platform: platform.name,
+        arch: arch,
       ),
-    );
-    await cacheRoot.create(recursive: true);
-    final cachedFile = File(p.join(cacheRoot.path, '${platform.name}_$arch'));
-    await cachedFile.writeAsBytes(bytes, flush: true);
-    final meta = File('${cachedFile.path}.meta.json');
-    await meta.writeAsString(
-      json.encode({
+      bytes: bytes,
+      meta: {
         'hash': hash,
         'size': bytes.length,
         'storage_path': storagePath,
-      }),
-      flush: true,
+      },
     );
-    return cachedFile;
   }
 
   Future<bool> _isLocalReleaseArtifactValid(ReleaseArtifact artifact) async {
