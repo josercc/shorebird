@@ -88,6 +88,7 @@ class ShorebirdCliCommandRunner extends CompletionCommandRunner<int> {
     addCommand(UpgradeCommand());
     addCommand(UploadResourcesCommand());
     addCommand(UploadSnapshotCommand());
+    addCommand(YamlCommand());
   }
 
   @override

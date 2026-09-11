@@ -13,3 +13,4 @@ export 'preview_command.dart';
 export 'release/release.dart';
 export 'releases/releases.dart';
 export 'upgrade_command.dart';
+export 'yaml_command.dart';

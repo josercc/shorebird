@@ -325,6 +325,7 @@ Engine • revision $shorebirdEngineRevision'''),
       group('when running upgrade command', () {
         setUp(() {
           when(() => logger.progress(any())).thenReturn(MockProgress());
+          when(() => shorebirdEnv.isGitInstall).thenReturn(true);
           when(
             shorebirdVersion.fetchCurrentGitHash,
           ).thenAnswer((_) async => 'current');

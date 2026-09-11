@@ -100,8 +100,8 @@ Notes
   (or on first release/patch if you passed --skip-flutter).
 - Set FLUTTERPATCH_TOKEN and run flutterpatch init (writes flutterpatch.yaml)
   before release/patch.
-- Upgrade by re-running the install script / downloading a newer archive
-  (flutterpatch upgrade is not used for packaged installs).
+- Upgrade with: flutterpatch upgrade
+  (re-runs the install script with --force --skip-path).
 EOF
 
 ARCHIVE_BASE="flutterpatch-cli-${VERSION}-${OS}-${ARCH}"

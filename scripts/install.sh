@@ -6,9 +6,21 @@
 #
 # Usage:
 #   curl -fsSL https://<site>/downloads/install_cli.sh | bash
-#   ./scripts/install.sh --force
+#   ./scripts/install.sh                 # resume / repair if already present
+#   ./scripts/install.sh --force         # reinstall CLI (keeps Flutter cache)
 #   ./scripts/install.sh --archive dist/cli/flutterpatch-cli-*.tar.gz
+#   ./scripts/install.sh --flutter-version 3.27.4
 #   ./scripts/install.sh --version 1.2.3 --skip-flutter
+#
+# Re-running after a failure resumes: skips CLI download when the binary
+# exists, resumes an interrupted Flutter git checkout, and skips engine
+# bootstrap when the toolchain cache is already present. Use --force to
+# re-download/overwrite the CLI package.
+#
+# Prefer --flutter-version <semver|git-hash> to install only the Flutter SDK
+# you will release/patch with (updates bin/internal/flutter.version and prunes
+# other cached revisions). Or pass --skip-flutter to defer download until
+# first release/patch.
 #
 # Environment:
 #   FLUTTERPATCH_ROOT                 install dir (default: ~/.flutterpatch)
@@ -16,19 +28,31 @@
 #   FLUTTERPATCH_DOWNLOADS_PROJECT_ID Appwrite project id
 #   FLUTTERPATCH_CLI_URL              direct archive URL (skips catalog)
 #   FLUTTERPATCH_FLUTTER_GIT_URL      Flutter fork git URL
-#   FLUTTER_STORAGE_BASE_URL          engine CDN (default: download.shorebird.dev)
+#   FLUTTERPATCH_ENGINE_CDN           engine CDN (default: download.shorebird.dev)
+#   FLUTTER_STORAGE_BASE_URL          ignored during install (unset; China Flutter
+#                                     mirrors do not host Shorebird engines)
 set -euo pipefail
+
+# Shorebird engine artifacts only live on download.shorebird.dev. User shells
+# often export FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn which
+# returns NoSuchKey (~471B XML) for Shorebird engine hashes — unset it so
+# bootstrap cannot accidentally inherit a Flutter China mirror.
+if [[ -n "${FLUTTER_STORAGE_BASE_URL:-}" ]]; then
+  echo "Ignoring FLUTTER_STORAGE_BASE_URL=${FLUTTER_STORAGE_BASE_URL} (Shorebird engines are not on Flutter mirrors)"
+  unset FLUTTER_STORAGE_BASE_URL
+fi
 
 # Defaults mirror deploy/install_remote.sh (DNS may still be IP-backed).
 _DEFAULT_DOWNLOADS_ENDPOINT="${FLUTTERPATCH_DEFAULT_DOWNLOADS_ENDPOINT:-http://139.199.88.243:8080/v1/functions/meta_ota_website_downloads/executions}"
 _DEFAULT_DOWNLOADS_PROJECT="${FLUTTERPATCH_DEFAULT_DOWNLOADS_PROJECT_ID:-6a97bce0001ab547c5f8}"
 _DEFAULT_FLUTTER_GIT="${FLUTTERPATCH_FLUTTER_GIT_URL:-https://github.com/shorebirdtech/flutter.git}"
-_DEFAULT_ENGINE_CDN="${FLUTTER_STORAGE_BASE_URL:-https://download.shorebird.dev}"
+_DEFAULT_ENGINE_CDN="${FLUTTERPATCH_ENGINE_CDN:-https://download.shorebird.dev}"
 
 FORCE=false
 SKIP_PATH=false
 SKIP_FLUTTER=false
 VERSION=""
+FLUTTER_VERSION_ARG=""
 ARCHIVE=""
 CLI_URL="${FLUTTERPATCH_CLI_URL:-}"
 
@@ -37,13 +61,19 @@ usage() {
 FlutterPatch CLI installer
 
 Options:
-  --force           Overwrite an existing ~/.flutterpatch install
-  --version VER     Prefer this CLI version from the download catalog
-  --archive PATH    Install from a local .tar.gz / .zip (dev / offline)
-  --url URL         Download this archive URL (skips catalog)
-  --skip-path       Do not modify shell rc files
-  --skip-flutter    Do not clone/precache the Shorebird Flutter SDK
-  -h, --help        Show this help
+  --force                 Reinstall CLI over an existing ~/.flutterpatch (keeps Flutter cache)
+  --version VER           Prefer this CLI version from the download catalog
+  --flutter-version VER   Install this Shorebird Flutter (semver or git hash).
+                          Pins bin/internal/flutter.version and removes other
+                          cached Flutter revisions to save disk space.
+  --archive PATH          Install from a local .tar.gz / .zip (dev / offline)
+  --url URL               Download this archive URL (skips catalog)
+  --skip-path             Do not modify shell rc files
+  --skip-flutter          Do not clone/precache the Shorebird Flutter SDK
+  -h, --help              Show this help
+
+Without --force, re-running resumes and only completes missing steps.
+Without --flutter-version, installs the Flutter revision pinned in the CLI package.
 EOF
 }
 
@@ -53,6 +83,7 @@ while [[ $# -gt 0 ]]; do
     --skip-path) SKIP_PATH=true; shift ;;
     --skip-flutter) SKIP_FLUTTER=true; shift ;;
     --version) VERSION="${2:-}"; shift 2 ;;
+    --flutter-version) FLUTTER_VERSION_ARG="${2:-}"; shift 2 ;;
     --archive) ARCHIVE="${2:-}"; shift 2 ;;
     --url) CLI_URL="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -63,6 +94,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -n "$FLUTTER_VERSION_ARG" && "$SKIP_FLUTTER" == true ]]; then
+  echo "Error: --flutter-version and --skip-flutter cannot be used together." >&2
+  exit 1
+fi
 
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -277,6 +313,89 @@ normalize_extract_tree() {
   return 1
 }
 
+flutter_toolchain_bootstrapped() {
+  local flutter_path="$1"
+  # Require a real dart binary — an empty dart-sdk/ dir is a failed bootstrap.
+  [[ -x "$flutter_path/bin/cache/dart-sdk/bin/dart" ]] || return 1
+  [[ -f "$flutter_path/bin/cache/flutter_tools.stamp" \
+    || -f "$flutter_path/bin/cache/flutter_tools.snapshot" \
+    || -f "$flutter_path/bin/cache/flutter_tools.dill" ]] || return 1
+  return 0
+}
+
+# Resolve semver (flutter_release/<ver>) or a git hash to a full revision.
+resolve_flutter_revision() {
+  local want="$1"
+  need_cmd git
+  want="$(printf '%s' "$want" | tr -d '[:space:]' | sed 's/^v//')"
+  if [[ -z "$want" ]]; then
+    echo "Error: empty --flutter-version" >&2
+    return 1
+  fi
+
+  # Semver-like → Shorebird release branch tip.
+  if [[ "$want" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.+-]*)?$ ]]; then
+    echo "Resolving Flutter $want via flutter_release/$want …" >&2
+    local line rev
+    line="$(git ls-remote --heads "$_DEFAULT_FLUTTER_GIT" "refs/heads/flutter_release/${want}" | head -1 || true)"
+    rev="$(printf '%s' "$line" | awk '{print $1}')"
+    if [[ -z "$rev" ]]; then
+      echo "Error: no Shorebird Flutter release branch flutter_release/$want" >&2
+      echo "  Check: flutterpatch flutter versions list (after install), or pass a git hash." >&2
+      return 1
+    fi
+    printf '%s' "$rev"
+    return 0
+  fi
+
+  # Git hash (short or full).
+  if [[ "$want" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+    echo "Resolving Flutter git revision $want …" >&2
+    local line rev
+    line="$(git ls-remote "$_DEFAULT_FLUTTER_GIT" "$want" | head -1 || true)"
+    rev="$(printf '%s' "$line" | awk '{print $1}')"
+    if [[ -n "$rev" ]]; then
+      printf '%s' "$rev"
+      return 0
+    fi
+    # Ambiguous short hash may not appear in ls-remote; accept as-is if full-ish.
+    if [[ ${#want} -ge 40 ]]; then
+      printf '%s' "$(printf '%s' "$want" | tr '[:upper:]' '[:lower:]')"
+      return 0
+    fi
+    echo "Error: could not resolve git revision $want on $_DEFAULT_FLUTTER_GIT" >&2
+    return 1
+  fi
+
+  echo "Error: --flutter-version must be a Flutter semver (e.g. 3.27.4) or git hash." >&2
+  return 1
+}
+
+pin_flutter_version() {
+  local root="$1" rev="$2" label="$3"
+  local version_file="$root/bin/internal/flutter.version"
+  mkdir -p "$root/bin/internal"
+  printf '%s\n' "$rev" >"$version_file"
+  echo "Pinned Flutter ${label} → $rev ($version_file)"
+}
+
+# Keep only the active revision under bin/cache/flutter/.
+prune_other_flutter_sdks() {
+  local root="$1" keep_rev="$2"
+  local cache="$root/bin/cache/flutter"
+  [[ -d "$cache" ]] || return 0
+  local dir name
+  for dir in "$cache"/*; do
+    [[ -e "$dir" ]] || continue
+    name="$(basename "$dir")"
+    if [[ "$name" == "$keep_rev" ]]; then
+      continue
+    fi
+    echo "Removing unused Flutter cache: $dir"
+    rm -rf "$dir"
+  done
+}
+
 init_flutter_toolchain() {
   local root="$1"
   local version_file="$root/bin/internal/flutter.version"
@@ -296,6 +415,10 @@ init_flutter_toolchain() {
   mkdir -p "$root/bin/cache/flutter"
   if [[ -x "$flutter_path/bin/flutter" ]]; then
     echo "Flutter SDK already present at $flutter_path"
+  elif [[ -d "$flutter_path/.git" ]]; then
+    echo "Resuming incomplete Flutter checkout ($rev)…"
+    git -C "$flutter_path" -c advice.detachedHead=false fetch --filter=tree:0 origin "$rev" || true
+    git -C "$flutter_path" -c advice.detachedHead=false checkout "$rev"
   else
     echo "Installing Shorebird Flutter ($rev)…"
     rm -rf "$flutter_path"
@@ -303,11 +426,24 @@ init_flutter_toolchain() {
     git -C "$flutter_path" -c advice.detachedHead=false checkout "$rev"
   fi
 
+  if flutter_toolchain_bootstrapped "$flutter_path"; then
+    echo "Flutter engine artifacts already present; skipping bootstrap"
+    prune_other_flutter_sdks "$root" "$rev"
+    return 0
+  fi
+
+  # Clear incomplete bootstrap leftovers so Flutter can re-download cleanly.
+  rm -rf "$flutter_path/bin/cache/dart-sdk" \
+    "$flutter_path/bin/cache/dart-sdk.old" \
+    "$flutter_path/bin/cache"/dart-sdk-*.zip
+
   echo "Bootstrapping Flutter engine artifacts…"
   FLUTTER_STORAGE_BASE_URL="$_DEFAULT_ENGINE_CDN" \
     "$flutter_path/bin/flutter" --disable-analytics >/dev/null 2>&1 || true
   FLUTTER_STORAGE_BASE_URL="$_DEFAULT_ENGINE_CDN" \
     "$flutter_path/bin/flutter" --version
+
+  prune_other_flutter_sdks "$root" "$rev"
 }
 
 # -------------------- main --------------------
@@ -326,6 +462,7 @@ echo "FlutterPatch CLI installer"
 echo "  target: $ROOT"
 echo "  platform: ${OS}-${ARCH}"
 
+RESUME=false
 if [[ -d "$ROOT" ]]; then
   if [[ "$FORCE" == true ]]; then
     echo "Existing install detected. Overwriting (--force)…"
@@ -342,8 +479,8 @@ if [[ -d "$ROOT" ]]; then
     fi
     rm -rf "$TMP_KEEP"
   else
-    echo "Error: existing FlutterPatch installation at $ROOT. Use --force to overwrite." >&2
-    exit 1
+    RESUME=true
+    echo "Existing install detected at $ROOT; resuming (use --force to reinstall CLI)…"
   fi
 else
   mkdir -p "$ROOT"
@@ -356,53 +493,67 @@ trap cleanup EXIT
 ARCHIVE_PATH=""
 RESOLVED_VERSION=""
 RESOLVED_SHA=""
+SKIP_CLI_PACKAGE=false
 
-if [[ -n "$ARCHIVE" ]]; then
-  if [[ ! -f "$ARCHIVE" ]]; then
-    echo "Error: archive not found: $ARCHIVE" >&2
-    exit 1
+# Resume: keep an already-extracted CLI binary unless forced / explicitly given.
+if [[ "$RESUME" == true && -x "$BIN_DIR/flutterpatch" && -z "$ARCHIVE" && -z "$CLI_URL" && -z "$VERSION" ]]; then
+  SKIP_CLI_PACKAGE=true
+  echo "CLI binary already present; skipping download"
+fi
+
+if [[ "$SKIP_CLI_PACKAGE" != true ]]; then
+  if [[ -n "$ARCHIVE" ]]; then
+    if [[ ! -f "$ARCHIVE" ]]; then
+      echo "Error: archive not found: $ARCHIVE" >&2
+      exit 1
+    fi
+    ARCHIVE_PATH="$ARCHIVE"
+    echo "Using local archive: $ARCHIVE_PATH"
+  elif [[ -n "$CLI_URL" ]]; then
+    case "$CLI_URL" in
+      *.zip) ARCHIVE_PATH="$WORKDIR/cli.zip" ;;
+      *) ARCHIVE_PATH="$WORKDIR/cli.tar.gz" ;;
+    esac
+    echo "Downloading $CLI_URL …"
+    curl -fL --progress-bar -o "$ARCHIVE_PATH" "$CLI_URL"
+  else
+    echo "Resolving latest package from download catalog…"
+    IFS=$'\t' read -r url resolved_version resolved_sha resolved_name < <(resolve_from_catalog "$OS" "$ARCH" "$VERSION")
+    RESOLVED_VERSION="$resolved_version"
+    RESOLVED_SHA="$resolved_sha"
+    case "${resolved_name:-$url}" in
+      *.zip) ARCHIVE_PATH="$WORKDIR/cli.zip" ;;
+      *) ARCHIVE_PATH="$WORKDIR/cli.tar.gz" ;;
+    esac
+    echo "Downloading FlutterPatch CLI ${RESOLVED_VERSION:-} (${OS}-${ARCH})…"
+    curl -fL --progress-bar -o "$ARCHIVE_PATH" "$url"
+    verify_sha256 "$ARCHIVE_PATH" "$RESOLVED_SHA"
   fi
-  ARCHIVE_PATH="$ARCHIVE"
-  echo "Using local archive: $ARCHIVE_PATH"
-elif [[ -n "$CLI_URL" ]]; then
-  case "$CLI_URL" in
-    *.zip) ARCHIVE_PATH="$WORKDIR/cli.zip" ;;
-    *) ARCHIVE_PATH="$WORKDIR/cli.tar.gz" ;;
-  esac
-  echo "Downloading $CLI_URL …"
-  curl -fL --progress-bar -o "$ARCHIVE_PATH" "$CLI_URL"
-else
-  echo "Resolving latest package from download catalog…"
-  IFS=$'\t' read -r url resolved_version resolved_sha resolved_name < <(resolve_from_catalog "$OS" "$ARCH" "$VERSION")
-  RESOLVED_VERSION="$resolved_version"
-  RESOLVED_SHA="$resolved_sha"
-  case "${resolved_name:-$url}" in
-    *.zip) ARCHIVE_PATH="$WORKDIR/cli.zip" ;;
-    *) ARCHIVE_PATH="$WORKDIR/cli.tar.gz" ;;
-  esac
-  echo "Downloading FlutterPatch CLI ${RESOLVED_VERSION:-} (${OS}-${ARCH})…"
-  curl -fL --progress-bar -o "$ARCHIVE_PATH" "$url"
-  verify_sha256 "$ARCHIVE_PATH" "$RESOLVED_SHA"
+
+  STAGE="$WORKDIR/stage"
+  mkdir -p "$STAGE"
+  extract_archive "$ARCHIVE_PATH" "$STAGE"
+  SRC="$(normalize_extract_tree "$STAGE")"
+
+  # Copy package contents into install root.
+  # Prefer rsync if available; fall back to tar pipe.
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a "$SRC"/ "$ROOT"/
+  else
+    tar -C "$SRC" -cf - . | tar -C "$ROOT" -xf -
+  fi
+
+  chmod +x "$BIN_DIR/flutterpatch" 2>/dev/null || true
 fi
-
-STAGE="$WORKDIR/stage"
-mkdir -p "$STAGE"
-extract_archive "$ARCHIVE_PATH" "$STAGE"
-SRC="$(normalize_extract_tree "$STAGE")"
-
-# Copy package contents into install root.
-# Prefer rsync if available; fall back to tar pipe.
-if command -v rsync >/dev/null 2>&1; then
-  rsync -a "$SRC"/ "$ROOT"/
-else
-  tar -C "$SRC" -cf - . | tar -C "$ROOT" -xf -
-fi
-
-chmod +x "$BIN_DIR/flutterpatch" 2>/dev/null || true
 
 if [[ ! -x "$BIN_DIR/flutterpatch" ]]; then
   echo "Error: expected executable at $BIN_DIR/flutterpatch" >&2
   exit 1
+fi
+
+if [[ -n "$FLUTTER_VERSION_ARG" ]]; then
+  RESOLVED_FLUTTER_REV="$(resolve_flutter_revision "$FLUTTER_VERSION_ARG")"
+  pin_flutter_version "$ROOT" "$RESOLVED_FLUTTER_REV" "$FLUTTER_VERSION_ARG"
 fi
 
 if [[ "$SKIP_FLUTTER" != true ]]; then
