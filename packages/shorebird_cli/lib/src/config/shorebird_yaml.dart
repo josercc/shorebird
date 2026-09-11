@@ -23,6 +23,7 @@ class ShorebirdYaml {
     required this.appId,
     this.flavors,
     this.baseUrl,
+    this.autoUpdate,
     this.patchVerification,
     this.uploadBaselines,
     this.uploadPatchResources,
@@ -56,6 +57,12 @@ class ShorebirdYaml {
 
   /// The base url used to check for updates.
   final String? baseUrl;
+
+  /// Whether or not to automatically update the app.
+  ///
+  /// When `false`, the app will not check for updates on launch. Updates can
+  /// still be triggered manually via the Shorebird updater API.
+  final bool? autoUpdate;
 
   /// The patch verification mode for the app.
   final PatchVerification? patchVerification;

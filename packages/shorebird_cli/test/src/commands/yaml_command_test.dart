@@ -54,6 +54,8 @@ void main() {
       expect(logged, contains('flavors (optional, map<string, string>)'));
       expect(logged, contains('Default: none'));
       expect(logged, contains('base_url (optional, string)'));
+      expect(logged, contains('auto_update (optional, bool)'));
+      expect(logged, contains('Default: true'));
       expect(logged, contains('patch_verification (optional, string)'));
       expect(
         logged,
@@ -90,6 +92,7 @@ void main() {
           'app_id',
           'flavors',
           'base_url',
+          'auto_update',
           'patch_verification',
           'upload_baselines',
           'upload_patch_resources',
@@ -101,6 +104,7 @@ void main() {
           'none (required)',
           'none',
           'none',
+          'true',
           'strict (when patch signing is enabled)',
           'false',
           'false',

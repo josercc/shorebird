@@ -51,15 +51,44 @@ app_id: test_app_id
       expect(shorebirdYaml.baseUrl, isNull);
     });
 
-    test('rejects auto_update key', () {
+    test('can be deserialized without auto_update', () {
+      const yaml = '''
+app_id: test_app_id
+''';
+      final shorebirdYaml = checkedYamlDecode(
+        yaml,
+        (m) => ShorebirdYaml.fromJson(m!),
+      );
+      expect(shorebirdYaml.appId, 'test_app_id');
+      expect(shorebirdYaml.autoUpdate, isNull);
+    });
+
+    test('can be deserialized with auto_update', () {
       const yaml = '''
 app_id: test_app_id
 auto_update: true
 ''';
-      expect(
-        () => checkedYamlDecode(yaml, (m) => ShorebirdYaml.fromJson(m!)),
-        throwsA(isA<ParsedYamlException>()),
+      final shorebirdYaml = checkedYamlDecode(
+        yaml,
+        (m) => ShorebirdYaml.fromJson(m!),
       );
+      expect(shorebirdYaml.appId, 'test_app_id');
+      expect(shorebirdYaml.flavors, isNull);
+      expect(shorebirdYaml.baseUrl, isNull);
+      expect(shorebirdYaml.autoUpdate, isTrue);
+    });
+
+    test('can be deserialized with auto_update: false', () {
+      const yaml = '''
+app_id: test_app_id
+auto_update: false
+''';
+      final shorebirdYaml = checkedYamlDecode(
+        yaml,
+        (m) => ShorebirdYaml.fromJson(m!),
+      );
+      expect(shorebirdYaml.appId, 'test_app_id');
+      expect(shorebirdYaml.autoUpdate, isFalse);
     });
 
     test('can be deserialized without patch_verification', () {

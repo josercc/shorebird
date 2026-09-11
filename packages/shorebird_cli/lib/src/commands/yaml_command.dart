@@ -52,6 +52,18 @@ flavors:
     values: null,
   ),
   (
+    name: 'auto_update',
+    required: false,
+    type: 'bool',
+    description:
+        'Whether the app automatically checks for updates on launch. When '
+        'false, updates can still be triggered manually via the Shorebird '
+        'updater API.',
+    defaultValue: 'true',
+    example: 'false',
+    values: null,
+  ),
+  (
     name: 'patch_verification',
     required: false,
     type: 'string',
