@@ -1,8 +1,6 @@
-import 'dart:io';
-
 import 'package:mason_logger/mason_logger.dart';
-import 'package:path/path.dart' as p;
 import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
+import 'package:shorebird_cli/src/config/config.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/ota/ota.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
@@ -18,9 +16,14 @@ class UploadResourcesCommand extends ShorebirdCommand {
   UploadResourcesCommand() {
     argParser
       ..addOption(
+        'flutter',
+        help:
+            'Flutter project directory. Overrides shorebird.yaml `flutter`. '
+            'Default: cwd (or shorebird.yaml `flutter`).',
+      )
+      ..addOption(
         'app-dir',
-        help: 'Flutter project directory.',
-        defaultsTo: Directory.current.path,
+        help: 'Same as --flutter.',
       )
       ..addOption(
         'app-id',
@@ -71,14 +74,17 @@ class UploadResourcesCommand extends ShorebirdCommand {
       return e.exitCode.code;
     }
 
-    final appDir = p.normalize(
-      p.absolute(results['app-dir'] as String? ?? Directory.current.path),
+    final yaml = shorebirdEnv.getShorebirdYaml();
+    final dirs = resolveProjectDirs(
+      flutterCli:
+          (results['flutter'] as String?) ?? (results['app-dir'] as String?),
+      yaml: yaml,
     );
 
     final versionOpt = (results['version'] as String?)?.trim();
     final version = (versionOpt != null && versionOpt.isNotEmpty)
         ? versionOpt
-        : readPubspecVersion(appDir);
+        : readPubspecVersion(dirs.flutter);
     if (version == null || version.isEmpty) {
       logger.err(
         'upload-resources requires --version '
@@ -90,7 +96,7 @@ class UploadResourcesCommand extends ShorebirdCommand {
     final explicitAppId = (results['app-id'] as String?)?.trim();
     final appId = (explicitAppId != null && explicitAppId.isNotEmpty)
         ? explicitAppId
-        : shorebirdEnv.getShorebirdYaml()?.appId;
+        : yaml?.appId;
     if (appId == null || appId.isEmpty) {
       logger.err(
         'Missing app_id. Pass --app-id or run from a project with '
@@ -110,7 +116,7 @@ class UploadResourcesCommand extends ShorebirdCommand {
     try {
       await uploadReleaseResources(
         ResourceUploadOptions(
-          appDir: appDir,
+          appDir: dirs.flutter,
           releaseVersion: version,
           client: codePushClientWrapper.codePushClient,
           appId: appId,

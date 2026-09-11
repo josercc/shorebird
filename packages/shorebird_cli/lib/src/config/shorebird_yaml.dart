@@ -27,6 +27,9 @@ class ShorebirdYaml {
     this.patchVerification,
     this.uploadBaselines,
     this.uploadPatchResources,
+    this.flutter,
+    this.android,
+    this.ios,
   });
 
   /// Creates a [ShorebirdYaml] from a JSON map.
@@ -80,6 +83,32 @@ class ShorebirdYaml {
   ///
   /// Explicit `--assets` / `--baseline-assets` still take precedence.
   final bool? uploadPatchResources;
+
+  /// Flutter project directory (contains `pubspec.yaml` / `lib`).
+  ///
+  /// Relative paths are resolved against the directory that contains
+  /// `shorebird.yaml`. When omitted, defaults to the current working
+  /// directory where `flutterpatch` is invoked.
+  ///
+  /// Used by `upload-snapshot`, `upload-resources`, `check-ota`, and
+  /// release baseline uploads.
+  final String? flutter;
+
+  /// Android project directory for OTA snapshot scans.
+  ///
+  /// Relative paths are resolved against the directory that contains
+  /// `shorebird.yaml`. When omitted, `<flutter>/android` is used if it
+  /// exists. Only needed by `upload-snapshot` / `check-ota` (not
+  /// `upload-resources`).
+  final String? android;
+
+  /// iOS project directory for OTA snapshot scans.
+  ///
+  /// Relative paths are resolved against the directory that contains
+  /// `shorebird.yaml`. When omitted, `<flutter>/ios` is used if it
+  /// exists. Only needed by `upload-snapshot` / `check-ota` (not
+  /// `upload-resources`).
+  final String? ios;
 }
 
 /// Extension on [ShorebirdYaml] to get the app id for a specific flavor.

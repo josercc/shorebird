@@ -841,17 +841,15 @@ ${summary.join('\n')}
     required String releaseVersion,
     required String platform,
   }) async {
-    final appDir = Directory.current.path;
+    final dirs = resolveProjectDirs(yaml: shorebirdEnv.getShorebirdYaml());
     final progress = logger.progress('Uploading OTA baselines');
     try {
       final client = codePushClientWrapper.codePushClient;
       await uploadReleaseSnapshot(
         SnapshotUploadOptions(
-          flutterDir: appDir,
-          androidDir: Directory('$appDir/android').existsSync()
-              ? '$appDir/android'
-              : null,
-          iosDir: Directory('$appDir/ios').existsSync() ? '$appDir/ios' : null,
+          flutterDir: dirs.flutter,
+          androidDir: dirs.android,
+          iosDir: dirs.ios,
           releaseVersion: releaseVersion,
           client: client,
           appId: appId,
@@ -860,7 +858,7 @@ ${summary.join('\n')}
       );
       await uploadReleaseResources(
         ResourceUploadOptions(
-          appDir: appDir,
+          appDir: dirs.flutter,
           releaseVersion: releaseVersion,
           client: client,
           appId: appId,

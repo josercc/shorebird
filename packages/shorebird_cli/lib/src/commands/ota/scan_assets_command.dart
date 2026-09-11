@@ -1,10 +1,9 @@
-import 'dart:io';
-
 import 'package:mason_logger/mason_logger.dart';
-import 'package:path/path.dart' as p;
+import 'package:shorebird_cli/src/config/config.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/ota/ota.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
+import 'package:shorebird_cli/src/shorebird_env.dart';
 
 /// {@template scan_assets_command}
 /// `flutterpatch scan-assets`
@@ -15,9 +14,14 @@ class ScanAssetsCommand extends ShorebirdCommand {
   ScanAssetsCommand() {
     argParser
       ..addOption(
+        'flutter',
+        help:
+            'Flutter project directory. Overrides shorebird.yaml `flutter`. '
+            'Default: cwd (or shorebird.yaml `flutter`).',
+      )
+      ..addOption(
         'app-dir',
-        help: 'Flutter project directory (contains pubspec.yaml).',
-        defaultsTo: Directory.current.path,
+        help: 'Same as --flutter.',
       )
       ..addOption(
         'version',
@@ -28,7 +32,7 @@ class ScanAssetsCommand extends ShorebirdCommand {
         abbr: 'o',
         help:
             'Output JSON path '
-            '(default: <app-dir>/flutterpatch_assets.json).',
+            '(default: <flutter>/flutterpatch_assets.json).',
       )
       ..addFlag(
         'include-dev',
@@ -53,9 +57,12 @@ class ScanAssetsCommand extends ShorebirdCommand {
 
   @override
   Future<int> run() async {
-    final appDir = p.normalize(
-      p.absolute(results['app-dir'] as String? ?? Directory.current.path),
+    final dirs = resolveProjectDirs(
+      flutterCli:
+          (results['flutter'] as String?) ?? (results['app-dir'] as String?),
+      yaml: shorebirdEnv.getShorebirdYaml(),
     );
+    final appDir = dirs.flutter;
     final listOnly = results['list-paths'] == true;
 
     try {

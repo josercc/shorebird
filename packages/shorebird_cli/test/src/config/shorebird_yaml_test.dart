@@ -174,6 +174,36 @@ app_id: test_app_id
       expect(shorebirdYaml.uploadPatchResources, isNull);
     });
 
+    test('can be deserialized with flutter/android/ios paths', () {
+      const yaml = '''
+app_id: test_app_id
+flutter: .
+android: ../android_host
+ios: ../ios_host
+''';
+      final shorebirdYaml = checkedYamlDecode(
+        yaml,
+        (m) => ShorebirdYaml.fromJson(m!),
+      );
+      expect(shorebirdYaml.appId, 'test_app_id');
+      expect(shorebirdYaml.flutter, '.');
+      expect(shorebirdYaml.android, '../android_host');
+      expect(shorebirdYaml.ios, '../ios_host');
+    });
+
+    test('defaults flutter/android/ios to null', () {
+      const yaml = '''
+app_id: test_app_id
+''';
+      final shorebirdYaml = checkedYamlDecode(
+        yaml,
+        (m) => ShorebirdYaml.fromJson(m!),
+      );
+      expect(shorebirdYaml.flutter, isNull);
+      expect(shorebirdYaml.android, isNull);
+      expect(shorebirdYaml.ios, isNull);
+    });
+
     group('AppIdExtension', () {
       test('getAppId returns base app id when no flavor is provided', () {
         const shorebirdYaml = ShorebirdYaml(appId: 'test_app_id');

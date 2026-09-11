@@ -1,8 +1,6 @@
-import 'dart:io';
-
 import 'package:mason_logger/mason_logger.dart';
-import 'package:path/path.dart' as p;
 import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
+import 'package:shorebird_cli/src/config/config.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/ota/ota.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
@@ -19,15 +17,26 @@ class UploadSnapshotCommand extends ShorebirdCommand {
     argParser
       ..addOption(
         'flutter',
-        help: 'Flutter project directory.',
+        help:
+            'Flutter project directory. Overrides shorebird.yaml `flutter`. '
+            'Default: cwd (or shorebird.yaml `flutter`).',
       )
       ..addOption(
         'app-dir',
         help: 'Same as --flutter.',
-        defaultsTo: Directory.current.path,
       )
-      ..addOption('android', help: 'Android project directory (optional).')
-      ..addOption('ios', help: 'iOS project directory (optional).')
+      ..addOption(
+        'android',
+        help:
+            'Android project directory. Overrides shorebird.yaml `android`. '
+            'Default: <flutter>/android when present.',
+      )
+      ..addOption(
+        'ios',
+        help:
+            'iOS project directory. Overrides shorebird.yaml `ios`. '
+            'Default: <flutter>/ios when present.',
+      )
       ..addOption(
         'app-id',
         help: 'App id (default: shorebird.yaml app_id).',
@@ -77,18 +86,19 @@ class UploadSnapshotCommand extends ShorebirdCommand {
       return e.exitCode.code;
     }
 
-    final flutterPath = p.normalize(
-      p.absolute(
-        (results['flutter'] as String?) ??
-            (results['app-dir'] as String?) ??
-            Directory.current.path,
-      ),
+    final yaml = shorebirdEnv.getShorebirdYaml();
+    final dirs = resolveProjectDirs(
+      flutterCli:
+          (results['flutter'] as String?) ?? (results['app-dir'] as String?),
+      androidCli: results['android'] as String?,
+      iosCli: results['ios'] as String?,
+      yaml: yaml,
     );
 
     final versionOpt = (results['version'] as String?)?.trim();
     final version = (versionOpt != null && versionOpt.isNotEmpty)
         ? versionOpt
-        : readPubspecVersion(flutterPath);
+        : readPubspecVersion(dirs.flutter);
     if (version == null || version.isEmpty) {
       logger.err(
         'upload-snapshot requires --version '
@@ -100,7 +110,7 @@ class UploadSnapshotCommand extends ShorebirdCommand {
     final explicitAppId = (results['app-id'] as String?)?.trim();
     final appId = (explicitAppId != null && explicitAppId.isNotEmpty)
         ? explicitAppId
-        : shorebirdEnv.getShorebirdYaml()?.appId;
+        : yaml?.appId;
     if (appId == null || appId.isEmpty) {
       logger.err(
         'Missing app_id. Pass --app-id or run from a project with '
@@ -120,9 +130,9 @@ class UploadSnapshotCommand extends ShorebirdCommand {
     try {
       await uploadReleaseSnapshot(
         SnapshotUploadOptions(
-          flutterDir: flutterPath,
-          androidDir: results['android'] as String?,
-          iosDir: results['ios'] as String?,
+          flutterDir: dirs.flutter,
+          androidDir: dirs.android,
+          iosDir: dirs.ios,
           releaseVersion: version,
           client: codePushClientWrapper.codePushClient,
           appId: appId,

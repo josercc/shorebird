@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
 import 'package:shorebird_cli/src/code_signer.dart';
 import 'package:shorebird_cli/src/common_arguments.dart';
+import 'package:shorebird_cli/src/config/config.dart';
 import 'package:shorebird_cli/src/deployment_track.dart';
 import 'package:shorebird_cli/src/extensions/arg_results.dart';
 import 'package:shorebird_cli/src/extensions/iterable.dart';
@@ -163,7 +164,7 @@ More info: ${troubleshootingUrl.toLink()}.
       if (changes.isNotEmpty && _shouldUploadChangedAssets) {
         logger.info('Uploading changed Flutter assets to control plane…');
         changes = await uploadChangedResourcesToControl(
-          appDir: Directory.current.path,
+          appDir: _flutterProjectDir,
           changes: changes,
           client: codePushClientWrapper.codePushClient,
           onLog: logger.detail,
@@ -207,6 +208,10 @@ More info: ${troubleshootingUrl.toLink()}.
       !argResults.options.contains('upload-assets') ||
       argResults['upload-assets'] != false;
 
+  /// Flutter project directory from shorebird.yaml / cwd.
+  String get _flutterProjectDir =>
+      resolveProjectDirs(yaml: shorebirdEnv.getShorebirdYaml()).flutter;
+
   /// Scans local assets, diffs against the server resource baseline for
   /// [releaseVersion], and optionally uploads add/update files.
   Future<({List<Map<String, dynamic>> changedResources, int? resourceNumber})?>
@@ -235,8 +240,9 @@ More info: ${troubleshootingUrl.toLink()}.
         return null;
       }
 
+      final flutterDir = _flutterProjectDir;
       final scanned = await scanFlutterAssets(
-        appDir: Directory.current.path,
+        appDir: flutterDir,
         releaseVersion: releaseVersion,
       );
       var changes = diffScannedAssets(
@@ -246,7 +252,7 @@ More info: ${troubleshootingUrl.toLink()}.
       if (changes.isNotEmpty && _shouldUploadChangedAssets) {
         logger.info('Uploading changed Flutter assets to control plane…');
         changes = await uploadChangedResourcesToControl(
-          appDir: Directory.current.path,
+          appDir: flutterDir,
           changes: changes,
           client: client,
           onLog: logger.detail,

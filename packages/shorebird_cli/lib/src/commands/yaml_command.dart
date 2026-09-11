@@ -99,6 +99,46 @@ flavors:
     example: 'true',
     values: null,
   ),
+  (
+    name: 'flutter',
+    required: false,
+    type: 'string',
+    description:
+        'Flutter project directory (contains pubspec.yaml / lib). Used by '
+        '`upload-snapshot`, `upload-resources`, `check-ota`, and release '
+        'baseline uploads. Relative paths are resolved against the directory '
+        'containing shorebird.yaml. CLI `--flutter` / `--app-dir` override '
+        'this.',
+    defaultValue: 'cwd (directory where flutterpatch is run)',
+    example: '.',
+    values: null,
+  ),
+  (
+    name: 'android',
+    required: false,
+    type: 'string',
+    description:
+        'Android project directory for OTA snapshot scans '
+        '(`upload-snapshot`, `check-ota`). Not used by `upload-resources`. '
+        'Relative paths are resolved against the directory containing '
+        'shorebird.yaml. CLI `--android` overrides this.',
+    defaultValue: '<flutter>/android when that directory exists',
+    example: '../android_host',
+    values: null,
+  ),
+  (
+    name: 'ios',
+    required: false,
+    type: 'string',
+    description:
+        'iOS project directory for OTA snapshot scans '
+        '(`upload-snapshot`, `check-ota`). Not used by `upload-resources`. '
+        'Relative paths are resolved against the directory containing '
+        'shorebird.yaml. CLI `--ios` overrides this.',
+    defaultValue: '<flutter>/ios when that directory exists',
+    example: '../ios_host',
+    values: null,
+  ),
 ];
 
 /// {@template yaml_command}

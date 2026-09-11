@@ -22,6 +22,9 @@ ShorebirdYaml _$ShorebirdYamlFromJson(Map json) => $checkedCreate(
         'patch_verification',
         'upload_baselines',
         'upload_patch_resources',
+        'flutter',
+        'android',
+        'ios',
       ],
     );
     final val = ShorebirdYaml(
@@ -44,6 +47,9 @@ ShorebirdYaml _$ShorebirdYamlFromJson(Map json) => $checkedCreate(
         'upload_patch_resources',
         (v) => v as bool?,
       ),
+      flutter: $checkedConvert('flutter', (v) => v as String?),
+      android: $checkedConvert('android', (v) => v as String?),
+      ios: $checkedConvert('ios', (v) => v as String?),
     );
     return val;
   },
@@ -67,6 +73,9 @@ Map<String, dynamic> _$ShorebirdYamlToJson(
   'patch_verification': _$PatchVerificationEnumMap[instance.patchVerification],
   'upload_baselines': instance.uploadBaselines,
   'upload_patch_resources': instance.uploadPatchResources,
+  'flutter': instance.flutter,
+  'android': instance.android,
+  'ios': instance.ios,
 };
 
 const _$PatchVerificationEnumMap = {

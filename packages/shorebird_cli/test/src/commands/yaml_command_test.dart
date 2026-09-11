@@ -65,6 +65,9 @@ void main() {
       expect(logged, contains('upload_baselines (optional, bool)'));
       expect(logged, contains('Default: false'));
       expect(logged, contains('upload_patch_resources (optional, bool)'));
+      expect(logged, contains('flutter (optional, string)'));
+      expect(logged, contains('android (optional, string)'));
+      expect(logged, contains('ios (optional, string)'));
       expect(logged, contains('Minimal example:'));
     });
 
@@ -96,6 +99,9 @@ void main() {
           'patch_verification',
           'upload_baselines',
           'upload_patch_resources',
+          'flutter',
+          'android',
+          'ios',
         ]),
       );
       expect(
@@ -108,6 +114,9 @@ void main() {
           'strict (when patch signing is enabled)',
           'false',
           'false',
+          'cwd (directory where flutterpatch is run)',
+          '<flutter>/android when that directory exists',
+          '<flutter>/ios when that directory exists',
         ]),
       );
       verifyNever(() => logger.info(any()));

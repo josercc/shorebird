@@ -421,6 +421,14 @@ base_url:
 
 # After patch: diff local assets vs server baseline and push changed_resources.
 # upload_patch_resources: true
+
+# Project directories for OTA scans (relative to this file, or absolute).
+# Default flutter = directory where flutterpatch is run.
+# upload-snapshot / check-ota also scan android + ios; upload-resources only
+# needs flutter.
+# flutter: .
+# android: ./android
+# ios: ./ios
 ''';
 
     final editor = YamlEditor(content)

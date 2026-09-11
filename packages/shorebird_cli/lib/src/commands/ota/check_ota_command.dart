@@ -1,8 +1,6 @@
-import 'dart:io';
-
 import 'package:mason_logger/mason_logger.dart';
-import 'package:path/path.dart' as p;
 import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
+import 'package:shorebird_cli/src/config/config.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/ota/ota.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
@@ -19,14 +17,29 @@ class CheckOtaCommand extends ShorebirdCommand {
     argParser
       ..addOption(
         'flutter',
-        help: 'Flutter project directory (contains pubspec.yaml / lib).',
+        help:
+            'Flutter project directory (contains pubspec.yaml / lib). '
+            'Overrides shorebird.yaml `flutter`. '
+            'Default: cwd (or shorebird.yaml `flutter`).',
       )
       ..addOption(
         'app-dir',
         help: 'Same as --flutter (compatibility with other commands).',
       )
-      ..addOption('android', help: 'Android project directory (optional).')
-      ..addOption('ios', help: 'iOS project directory (optional).')
+      ..addOption(
+        'android',
+        help:
+            'Android project directory (optional). '
+            'Overrides shorebird.yaml `android`. '
+            'Default: <flutter>/android when present.',
+      )
+      ..addOption(
+        'ios',
+        help:
+            'iOS project directory (optional). '
+            'Overrides shorebird.yaml `ios`. '
+            'Default: <flutter>/ios when present.',
+      )
       ..addOption(
         'version',
         help:
@@ -84,20 +97,22 @@ class CheckOtaCommand extends ShorebirdCommand {
   @override
   Future<int> run() async {
     try {
-      final flutterPath = p.normalize(
-        p.absolute(
-          (results['flutter'] as String?) ??
-              (results['app-dir'] as String?) ??
-              Directory.current.path,
-        ),
+      final yaml = shorebirdEnv.getShorebirdYaml();
+      final dirs = resolveProjectDirs(
+        flutterCli:
+            (results['flutter'] as String?) ?? (results['app-dir'] as String?),
+        androidCli: results['android'] as String?,
+        iosCli: results['ios'] as String?,
+        yaml: yaml,
       );
+      final flutterPath = dirs.flutter;
 
       if (results['list-paths'] == true) {
         final ignore = FlutterPatchIgnore.load(flutterPath);
         final result = await checkOta(
           flutterDir: flutterPath,
-          androidDir: results['android'] as String?,
-          iosDir: results['ios'] as String?,
+          androidDir: dirs.android,
+          iosDir: dirs.ios,
           writeSnapshot: false,
           skipLocalBaseline: true,
           includeDev: results['include-dev'] == true,
@@ -133,7 +148,7 @@ class CheckOtaCommand extends ShorebirdCommand {
         final explicitAppId = (results['app-id'] as String?)?.trim();
         final appId = (explicitAppId != null && explicitAppId.isNotEmpty)
             ? explicitAppId
-            : shorebirdEnv.getShorebirdYaml()?.appId;
+            : yaml?.appId;
         if (appId == null || appId.isEmpty) {
           logger.err(
             'Missing app_id. Pass --app-id or run from a project with '
@@ -176,8 +191,8 @@ class CheckOtaCommand extends ShorebirdCommand {
 
       final result = await checkOta(
         flutterDir: flutterPath,
-        androidDir: results['android'] as String?,
-        iosDir: results['ios'] as String?,
+        androidDir: dirs.android,
+        iosDir: dirs.ios,
         outPath: results['out'] as String?,
         baselinePath: results['baseline'] as String?,
         baselineSnapshot: serverSnapshot,
