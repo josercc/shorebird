@@ -138,6 +138,14 @@ Defaults to "latest" which builds using the latest stable Flutter version.''',
 The version of the associated release (e.g. "1.0.0"). This should be the version
 of the iOS app that is using this module. (aar and ios-framework only)''',
       )
+      ..addOption(
+        'from-release',
+        help: '''
+Clone artifacts from an existing release instead of rebuilding Flutter.
+Use this when only the host app version changed (e.g. 1.0.0+1 → 1.0.0+2)
+and Dart/Flutter code is unchanged. Requires --release-version.
+Supported for aar and ios-framework only.''',
+      )
       ..addMultiOption(
         'target-platform',
         help: 'The target platform(s) for which the app is compiled.',
@@ -269,6 +277,9 @@ of the iOS app that is using this module. (aar and ios-framework only)''',
   /// The flutter version specified.
   String get flutterVersionArg => results['flutter-version'] as String;
 
+  /// Existing release version to clone artifacts from, if provided.
+  String? get fromReleaseVersion => results['from-release'] as String?;
+
   /// The build name specified via `--build-name`.
   String? get buildName =>
       results[CommonArguments.buildNameArg.name] as String?;
@@ -304,6 +315,17 @@ of the iOS app that is using this module. (aar and ios-framework only)''',
     // This command handles logging, we don't need to provide our own
     // progress, error logs, etc.
     final app = await codePushClientWrapper.getApp(appId: appId);
+
+    final fromRelease = fromReleaseVersion;
+    if (fromRelease != null) {
+      await createReleaseByCloning(
+        releaser: releaser,
+        app: app,
+        fromReleaseVersion: fromRelease,
+      );
+      return;
+    }
+
     final targetFlutterRevision = await resolveTargetFlutterRevision();
     try {
       await shorebirdFlutter.installRevision(revision: targetFlutterRevision);
@@ -421,9 +443,150 @@ of the iOS app that is using this module. (aar and ios-framework only)''',
     );
   }
 
+  /// Creates a release by cloning artifacts from [fromReleaseVersion].
+  ///
+  /// Skips the Flutter build. Intended for add-to-app (aar / ios-framework)
+  /// when only the host native version changed.
+  @visibleForTesting
+  Future<void> createReleaseByCloning({
+    required Releaser releaser,
+    required AppMetadata app,
+    required String fromReleaseVersion,
+  }) async {
+    final releasePlatform = releaser.releaseType.releasePlatform;
+    final releaseVersion = results['release-version'] as String?;
+    if (releaseVersion == null || releaseVersion.isEmpty) {
+      logger.err('Missing required argument: --release-version');
+      throw ProcessExit(ExitCode.usage.code);
+    }
+
+    if (releaseVersion == fromReleaseVersion) {
+      logger.err(
+        '--from-release must differ from --release-version '
+        '($releaseVersion).',
+      );
+      throw ProcessExit(ExitCode.usage.code);
+    }
+
+    final sourceRelease = await codePushClientWrapper.getRelease(
+      appId: appId,
+      releaseVersion: fromReleaseVersion,
+    );
+
+    final sourceStatus = sourceRelease.platformStatuses[releasePlatform];
+    if (sourceStatus != ReleaseStatus.active) {
+      logger.err(
+        '''
+Source release $fromReleaseVersion has no active ${releasePlatform.name} artifacts
+(status: ${sourceStatus?.name ?? 'missing'}).
+Create a full release for $fromReleaseVersion first, or pick another --from-release.''',
+      );
+      throw ProcessExit(ExitCode.software.code);
+    }
+
+    final targetFlutterRevision = sourceRelease.flutterRevision;
+    logger.info(
+      '''
+Cloning ${releaser.artifactDisplayName} artifacts from release ${lightCyan.wrap(fromReleaseVersion)}
+→ ${lightCyan.wrap(releaseVersion)} (skipping Flutter build).
+Reuse your existing local ${lightCyan.wrap('release/')} artifacts in the host app; Flutter did not change.
+''',
+    );
+
+    await ensureVersionIsReleasable(
+      version: releaseVersion,
+      flutterRevision: targetFlutterRevision,
+      releasePlatform: releasePlatform,
+    );
+
+    final dryRun = results['dry-run'] == true;
+    if (dryRun) {
+      logger
+        ..info('No issues detected.')
+        ..info('The server may enforce additional checks.');
+      throw ProcessExit(ExitCode.success.code);
+    }
+
+    final releaseFlutterShorebirdEnv = shorebirdEnv.copyWith(
+      flutterRevisionOverride: targetFlutterRevision,
+    );
+    return await runScoped(
+      () async {
+        await printReleaseSummary(
+          app: app,
+          releaseVersion: releaseVersion,
+          flutterVersion: targetFlutterRevision,
+          releasePlatform: releasePlatform,
+          fromReleaseVersion: fromReleaseVersion,
+          flutterVersionDisplay: shorebirdFlutter.formatVersion(
+            revision: sourceRelease.flutterRevision,
+            version: sourceRelease.flutterVersion,
+          ),
+        );
+
+        final release = await getOrCreateRelease(
+          version: releaseVersion,
+          releasePlatform: releasePlatform,
+        );
+        await prepareRelease(release: release, releaser: releaser);
+        await codePushClientWrapper.cloneReleaseArtifacts(
+          appId: appId,
+          sourceReleaseId: sourceRelease.id,
+          targetReleaseId: release.id,
+          platform: releasePlatform,
+        );
+        await finalizeRelease(release: release, releaser: releaser);
+
+        logger
+          ..success('''
+
+✅ Published Release ${release.version} (cloned from $fromReleaseVersion)!''')
+          ..info(releaser.postReleaseInstructions);
+
+        printPatchInstructions(
+          releaser: releaser,
+          releaseVersion: releaseVersion,
+          releaseType: releaser.releaseType,
+          flavor: flavor,
+          target: target,
+        );
+      },
+      values: {shorebirdEnvRef.overrideWith(() => releaseFlutterShorebirdEnv)},
+    );
+  }
+
   /// Validates arguments that are common to all release types.
   Future<void> assertArgsAreValid(Releaser releaser) async {
     results.assertAbsentOrValidPublicKeyOrCmd();
+
+    final fromRelease = fromReleaseVersion;
+    if (fromRelease != null) {
+      if (!releaser.supportsCloneFromRelease) {
+        logger.err(
+          '''--from-release is only supported for aar and ios-framework releases.''',
+        );
+        throw ProcessExit(ExitCode.usage.code);
+      }
+      if (results.wasParsed('flutter-version') &&
+          flutterVersionArg != 'latest') {
+        logger.err(
+          '''--flutter-version cannot be used with --from-release. The source release's Flutter revision is used.''',
+        );
+        throw ProcessExit(ExitCode.usage.code);
+      }
+      if (results.wasParsed(CommonArguments.obfuscateArg.name) &&
+          results[CommonArguments.obfuscateArg.name] == true) {
+        logger.err(
+          '--obfuscate cannot be used with --from-release '
+          '(no Flutter rebuild is performed).',
+        );
+        throw ProcessExit(ExitCode.usage.code);
+      }
+      // Skip Flutter-version minimum checks; the source release already
+      // validated the Flutter pin used for these artifacts.
+      await releaser.assertArgsAreValid();
+      return;
+    }
 
     final shorebirdYaml = shorebirdEnv.getShorebirdYaml();
     final hasPublicKey =
@@ -567,21 +730,27 @@ To resolve this issue, you can:
     required String releaseVersion,
     required String flutterVersion,
     required ReleasePlatform releasePlatform,
+    String? fromReleaseVersion,
+    String? flutterVersionDisplay,
   }) async {
-    final flutterVersionString = await shorebirdFlutter.getVersionAndRevision();
+    final flutterVersionString =
+        flutterVersionDisplay ??
+        await shorebirdFlutter.getVersionAndRevision();
     // TODO(bryanoltman): include archs in the summary for android
     // (and other platforms?)
     final summary = [
       '''📱 App: ${lightCyan.wrap(app.displayName)} ${lightCyan.wrap('(${app.appId})')}''',
       if (flavor != null) '🍧 Flavor: ${lightCyan.wrap(flavor)}',
       '📦 Release Version: ${lightCyan.wrap(releaseVersion)}',
+      if (fromReleaseVersion != null)
+        '🧬 Cloned From: ${lightCyan.wrap(fromReleaseVersion)}',
       '🕹️  Platform: ${lightCyan.wrap(releasePlatform.name)}',
       '🐦 Flutter Version: ${lightCyan.wrap(flutterVersionString)}',
     ];
 
     logger.info('''
 
-${styleBold.wrap(lightGreen.wrap('🚀 Ready to create a new release!'))}
+${styleBold.wrap(lightGreen.wrap(fromReleaseVersion != null ? '🚀 Ready to clone release artifacts!' : '🚀 Ready to create a new release!'))}
 
 ${summary.join('\n')}
 ''');

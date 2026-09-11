@@ -7,6 +7,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:path/path.dart' as p;
 import 'package:platform/platform.dart';
 import 'package:scoped_deps/scoped_deps.dart';
+import 'package:shorebird_cli/src/artifact_manager.dart';
 import 'package:shorebird_cli/src/auth/auth.dart';
 import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
 import 'package:shorebird_cli/src/deployment_track.dart';
@@ -150,6 +151,7 @@ void main() {
       canSideload: true,
     );
 
+    late ArtifactManager artifactManager;
     late CodePushClient codePushClient;
     late Ditto ditto;
     late ShorebirdLogger logger;
@@ -164,6 +166,7 @@ void main() {
       return runScoped(
         body,
         values: {
+          artifactManagerRef.overrideWith(() => artifactManager),
           dittoRef.overrideWith(() => ditto),
           loggerRef.overrideWith(() => logger),
           platformRef.overrideWith(() => platform),
@@ -176,9 +179,11 @@ void main() {
     setUpAll(() {
       registerFallbackValue(ReleasePlatform.android);
       registerFallbackValue(ReleaseStatus.draft);
+      registerFallbackValue(Uri.parse('https://example.com'));
     });
 
     setUp(() {
+      artifactManager = MockArtifactManager();
       codePushClient = MockCodePushClient();
       ditto = MockDitto();
       logger = MockShorebirdLogger();
@@ -2683,6 +2688,96 @@ Please bump your version number and try again.''',
             ),
           ),
           completes,
+        );
+      });
+    });
+
+    group('cloneReleaseArtifacts', () {
+      const targetReleaseId = 456;
+      late File downloadedArtifact;
+
+      setUp(() {
+        downloadedArtifact = File(
+          p.join(Directory.systemTemp.createTempSync().path, 'artifact.bin'),
+        )..writeAsBytesSync([1, 2, 3, 4]);
+
+        when(
+          () => codePushClient.getReleaseArtifacts(
+            appId: any(named: 'appId'),
+            releaseId: any(named: 'releaseId'),
+            platform: any(named: 'platform'),
+          ),
+        ).thenAnswer((_) async => [releaseArtifact]);
+        when(
+          () => artifactManager.downloadFile(any()),
+        ).thenAnswer((_) async => downloadedArtifact);
+        when(
+          () => codePushClient.createReleaseArtifact(
+            appId: any(named: 'appId'),
+            releaseId: any(named: 'releaseId'),
+            artifactPath: any(named: 'artifactPath'),
+            arch: any(named: 'arch'),
+            platform: any(named: 'platform'),
+            hash: any(named: 'hash'),
+            canSideload: any(named: 'canSideload'),
+            podfileLockHash: any(named: 'podfileLockHash'),
+          ),
+        ).thenAnswer((_) async {});
+      });
+
+      test('downloads and re-uploads each source artifact', () async {
+        await runWithOverrides(
+          () => codePushClientWrapper.cloneReleaseArtifacts(
+            appId: app.appId,
+            sourceReleaseId: releaseId,
+            targetReleaseId: targetReleaseId,
+            platform: releasePlatform,
+          ),
+        );
+
+        verify(
+          () => codePushClient.getReleaseArtifacts(
+            appId: app.appId,
+            releaseId: releaseId,
+            platform: releasePlatform,
+          ),
+        ).called(1);
+        verify(
+          () => artifactManager.downloadFile(Uri.parse(releaseArtifact.url)),
+        ).called(1);
+        verify(
+          () => codePushClient.createReleaseArtifact(
+            appId: app.appId,
+            releaseId: targetReleaseId,
+            artifactPath: downloadedArtifact.path,
+            arch: releaseArtifact.arch,
+            platform: releasePlatform,
+            hash: any(named: 'hash'),
+            canSideload: releaseArtifact.canSideload,
+            podfileLockHash: releaseArtifact.podfileLockHash,
+          ),
+        ).called(1);
+      });
+
+      test('exits when source release has no artifacts', () async {
+        when(
+          () => codePushClient.getReleaseArtifacts(
+            appId: any(named: 'appId'),
+            releaseId: any(named: 'releaseId'),
+            platform: any(named: 'platform'),
+          ),
+        ).thenAnswer((_) async => []);
+
+        await expectLater(
+          () async => runWithOverrides(
+            () => codePushClientWrapper.cloneReleaseArtifacts(
+              appId: app.appId,
+              sourceReleaseId: releaseId,
+              targetReleaseId: targetReleaseId,
+              platform: releasePlatform,
+            ),
+          ),
+          exitsWithCode(ExitCode.software),
         );
       });
     });

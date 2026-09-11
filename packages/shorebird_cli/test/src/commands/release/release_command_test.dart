@@ -119,6 +119,7 @@ void main() {
       when(() => argResults['dry-run']).thenReturn(false);
       when(() => argResults['platforms']).thenReturn(['android']);
       when(() => argResults['flutter-version']).thenReturn('latest');
+      when(() => argResults['from-release']).thenReturn(null);
       when(() => argResults.wasParsed(any())).thenReturn(true);
       when(
         () => argResults.wasParsed(CommonArguments.publicKeyCmd.name),
@@ -782,6 +783,212 @@ $exception'''),
             '''No platforms were provided. Use the --platforms argument to provide one or more platforms''',
           ),
         ).called(1);
+      });
+    });
+
+    group('when --from-release is specified', () {
+      const fromVersion = '1.0.0+1';
+      const targetVersion = '1.0.0+2';
+      final sourceRelease = Release(
+        id: 42,
+        appId: appId,
+        version: fromVersion,
+        flutterRevision: flutterRevision,
+        flutterVersion: flutterVersionString,
+        displayName: fromVersion,
+        platformStatuses: const {
+          ReleasePlatform.android: ReleaseStatus.active,
+        },
+        createdAt: DateTime(2023),
+        updatedAt: DateTime(2023),
+      );
+      final clonedRelease = Release(
+        id: 43,
+        appId: appId,
+        version: targetVersion,
+        flutterRevision: flutterRevision,
+        flutterVersion: flutterVersionString,
+        displayName: targetVersion,
+        platformStatuses: const {},
+        createdAt: DateTime(2023),
+        updatedAt: DateTime(2023),
+      );
+
+      setUp(() {
+        when(() => argResults['from-release']).thenReturn(fromVersion);
+        when(() => argResults['release-version']).thenReturn(targetVersion);
+        when(() => argResults['platforms']).thenReturn(['aar']);
+        when(() => argResults.wasParsed('flutter-version')).thenReturn(false);
+        when(
+          () => argResults.wasParsed(CommonArguments.obfuscateArg.name),
+        ).thenReturn(false);
+        when(() => releaser.supportsCloneFromRelease).thenReturn(true);
+        when(() => releaser.releaseType).thenReturn(ReleaseType.aar);
+        when(() => releaser.artifactDisplayName).thenReturn('Android archive');
+        when(
+          () => shorebirdFlutter.formatVersion(
+            revision: any(named: 'revision'),
+            version: any(named: 'version'),
+          ),
+        ).thenReturn('$flutterVersionString (${flutterRevision.substring(0, 10)})');
+        when(
+          () => codePushClientWrapper.getRelease(
+            appId: appId,
+            releaseVersion: fromVersion,
+          ),
+        ).thenAnswer((_) async => sourceRelease);
+        when(
+          () => codePushClientWrapper.maybeGetRelease(
+            appId: appId,
+            releaseVersion: targetVersion,
+          ),
+        ).thenAnswer((_) async => null);
+        when(
+          () => codePushClientWrapper.createRelease(
+            appId: appId,
+            version: targetVersion,
+            flutterRevision: flutterRevision,
+            platform: ReleasePlatform.android,
+          ),
+        ).thenAnswer((_) async => clonedRelease);
+        when(
+          () => codePushClientWrapper.cloneReleaseArtifacts(
+            appId: any(named: 'appId'),
+            sourceReleaseId: any(named: 'sourceReleaseId'),
+            targetReleaseId: any(named: 'targetReleaseId'),
+            platform: any(named: 'platform'),
+          ),
+        ).thenAnswer((_) async {});
+      });
+
+      test('clones artifacts without building', () async {
+        final exitCode = await runWithOverrides(command.run);
+        expect(exitCode, equals(ExitCode.success.code));
+
+        verifyNever(() => releaser.buildReleaseArtifacts());
+        verifyNever(
+          () => shorebirdFlutter.installRevision(
+            revision: any(named: 'revision'),
+          ),
+        );
+        verify(
+          () => codePushClientWrapper.cloneReleaseArtifacts(
+            appId: appId,
+            sourceReleaseId: sourceRelease.id,
+            targetReleaseId: clonedRelease.id,
+            platform: ReleasePlatform.android,
+          ),
+        ).called(1);
+        verify(
+          () => logger.success('''
+
+✅ Published Release ${clonedRelease.version} (cloned from $fromVersion)!'''),
+        ).called(1);
+      });
+
+      group('when platform does not support cloning', () {
+        setUp(() {
+          when(() => releaser.supportsCloneFromRelease).thenReturn(false);
+          when(() => releaser.releaseType).thenReturn(ReleaseType.android);
+        });
+
+        test('exits with usage code', () async {
+          await expectLater(
+            runWithOverrides(command.run),
+            exitsWithCode(ExitCode.usage),
+          );
+          verify(
+            () => logger.err(
+              '''--from-release is only supported for aar and ios-framework releases.''',
+            ),
+          ).called(1);
+          verifyNever(
+            () => codePushClientWrapper.cloneReleaseArtifacts(
+              appId: any(named: 'appId'),
+              sourceReleaseId: any(named: 'sourceReleaseId'),
+              targetReleaseId: any(named: 'targetReleaseId'),
+              platform: any(named: 'platform'),
+            ),
+          );
+        });
+      });
+
+      group('when --flutter-version is also provided', () {
+        setUp(() {
+          when(() => argResults.wasParsed('flutter-version')).thenReturn(true);
+          when(() => argResults['flutter-version']).thenReturn('3.22.0');
+        });
+
+        test('exits with usage code', () async {
+          await expectLater(
+            runWithOverrides(command.run),
+            exitsWithCode(ExitCode.usage),
+          );
+          verify(
+            () => logger.err(
+              '''--flutter-version cannot be used with --from-release. The source release's Flutter revision is used.''',
+            ),
+          ).called(1);
+        });
+      });
+
+      group('when from-release equals release-version', () {
+        setUp(() {
+          when(() => argResults['release-version']).thenReturn(fromVersion);
+        });
+
+        test('exits with usage code', () async {
+          await expectLater(
+            runWithOverrides(command.run),
+            exitsWithCode(ExitCode.usage),
+          );
+          verify(
+            () => logger.err(
+              '--from-release must differ from --release-version '
+              '($fromVersion).',
+            ),
+          ).called(1);
+        });
+      });
+
+      group('when source release platform is not active', () {
+        setUp(() {
+          when(
+            () => codePushClientWrapper.getRelease(
+              appId: appId,
+              releaseVersion: fromVersion,
+            ),
+          ).thenAnswer(
+            (_) async => Release(
+              id: 42,
+              appId: appId,
+              version: fromVersion,
+              flutterRevision: flutterRevision,
+              flutterVersion: flutterVersionString,
+              displayName: fromVersion,
+              platformStatuses: const {
+                ReleasePlatform.android: ReleaseStatus.draft,
+              },
+              createdAt: DateTime(2023),
+              updatedAt: DateTime(2023),
+            ),
+          );
+        });
+
+        test('exits with software code', () async {
+          await expectLater(
+            runWithOverrides(command.run),
+            exitsWithCode(ExitCode.software),
+          );
+          verifyNever(
+            () => codePushClientWrapper.cloneReleaseArtifacts(
+              appId: any(named: 'appId'),
+              sourceReleaseId: any(named: 'sourceReleaseId'),
+              targetReleaseId: any(named: 'targetReleaseId'),
+              platform: any(named: 'platform'),
+            ),
+          );
+        });
       });
     });
 

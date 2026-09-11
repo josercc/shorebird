@@ -1,19 +1,16 @@
 // flutterpatch: ownership=REPLACE
-import 'dart:io';
-
 import 'package:mason_logger/mason_logger.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/platform.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
-import 'package:shorebird_cli/src/shorebird_env.dart';
 import 'package:shorebird_cli/src/shorebird_process.dart';
-import 'package:shorebird_cli/src/shorebird_version.dart';
 
 /// {@template upgrade_command}
 /// `flutterpatch upgrade`
 ///
-/// Packaged (website) installs re-run the one-click installer with `--force`.
-/// Git checkouts keep the Shorebird-style `git reset` upgrade path.
+/// Re-runs the one-click installer with `--force` to install the latest CLI
+/// package. Flutter SDK cache is left alone (`--skip-flutter`); shell rc files
+/// are not modified (`--skip-path`).
 /// {@endtemplate}
 class UpgradeCommand extends ShorebirdCommand {
   /// {@macro upgrade_command}
@@ -41,15 +38,6 @@ class UpgradeCommand extends ShorebirdCommand {
 
   @override
   Future<int> run() async {
-    if (shorebirdEnv.isGitInstall) {
-      return _upgradeGitInstall();
-    }
-    return _upgradePackagedInstall();
-  }
-
-  /// Re-runs [scripts/install.sh] / [scripts/install.ps1] with `--force`
-  /// (and `--skip-path` so shell rc files are left alone).
-  Future<int> _upgradePackagedInstall() async {
     final installUrl = _resolveInstallScriptUrl();
     logger
       ..info('Upgrading FlutterPatch via installer…')
@@ -96,7 +84,9 @@ class UpgradeCommand extends ShorebirdCommand {
       [
         '-c',
         // curl|bash mirrors the documented one-click install UX.
-        'curl -fsSL "\$$installUrlEnvVar" | bash -s -- --force --skip-path',
+        // --skip-flutter: upgrade only replaces the CLI package.
+        'curl -fsSL "\$$installUrlEnvVar" | '
+            'bash -s -- --force --skip-path --skip-flutter',
       ],
       environment: environment,
     );
@@ -106,8 +96,8 @@ class UpgradeCommand extends ShorebirdCommand {
     final environment = Map<String, String>.of(platform.environment)
       ..[installUrlEnvVar] = installUrl;
 
-    // Download to a temp .ps1 then invoke with -Force -SkipPath (iex alone
-    // cannot pass parameters cleanly).
+    // Download to a temp .ps1 then invoke with -Force -SkipPath -SkipFlutter
+    // (iex alone cannot pass parameters cleanly).
     const command =
         r'''
 $ErrorActionPreference = 'Stop'
@@ -115,7 +105,7 @@ $url = $env:FLUTTERPATCH_INSTALL_URL
 $tmp = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), ('flutterpatch-upgrade-' + [guid]::NewGuid().ToString() + '.ps1'))
 try {
   Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $tmp
-  & $tmp -Force -SkipPath
+  & $tmp -Force -SkipPath -SkipFlutter
   exit $LASTEXITCODE
 } finally {
   Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
@@ -127,47 +117,5 @@ try {
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command],
       environment: environment,
     );
-  }
-
-  /// Original Shorebird git-checkout upgrade (`git fetch` + hard reset).
-  Future<int> _upgradeGitInstall() async {
-    final updateCheckProgress = logger.progress('Checking for updates');
-
-    late final String currentVersion;
-    try {
-      currentVersion = await shorebirdVersion.fetchCurrentGitHash();
-    } on ProcessException catch (error) {
-      updateCheckProgress.fail();
-      logger.err('Fetching current version failed: ${error.message}');
-      return ExitCode.software.code;
-    }
-
-    late final String latestVersion;
-    try {
-      latestVersion = await shorebirdVersion.fetchLatestGitHash();
-    } on ProcessException catch (error) {
-      updateCheckProgress.fail();
-      logger.err('Checking for updates failed: ${error.message}');
-      return ExitCode.software.code;
-    }
-
-    updateCheckProgress.complete('Checked for updates');
-
-    if (currentVersion == latestVersion) {
-      logger.info('FlutterPatch is already at the latest version.');
-      return ExitCode.success.code;
-    }
-
-    final updateProgress = logger.progress('Updating');
-    try {
-      await shorebirdVersion.attemptReset(revision: latestVersion);
-    } on ProcessException catch (error) {
-      updateProgress.fail();
-      logger.err('Updating failed: ${error.message}');
-      return ExitCode.software.code;
-    }
-
-    updateProgress.complete('Updated successfully.');
-    return ExitCode.success.code;
   }
 }

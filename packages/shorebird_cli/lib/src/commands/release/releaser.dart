@@ -54,6 +54,14 @@ abstract class Releaser {
   /// "Android app", "iOS app").
   String get artifactDisplayName;
 
+  /// Whether this releaser supports creating a new release by cloning
+  /// artifacts from an existing release via `--from-release`.
+  ///
+  /// Used by add-to-app flows (aar / ios-framework) where the Shorebird
+  /// release version tracks the host app version, so a native-only version
+  /// bump should not require rebuilding Flutter.
+  bool get supportsCloneFromRelease => false;
+
   /// Asserts that the command can be run.
   Future<void> assertPreconditions();
 

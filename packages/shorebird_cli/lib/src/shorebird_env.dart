@@ -79,13 +79,44 @@ class ShorebirdEnv {
   /// - Snapshot (dev / git install): `$ROOT/bin/cache/shorebird.snapshot`
   /// - Packaged AOT binary: `$ROOT/bin/flutterpatch[.exe]`
   /// - Override: `FLUTTERPATCH_ROOT` environment variable
+  ///
+  /// Packaged installs live under `~/.flutterpatch`. The old Shorebird
+  /// `parent^3` snapshot heuristic applied to `$ROOT/bin/flutterpatch` lands
+  /// on `$HOME` and then looks for `$HOME/bin/internal/flutter.version`. Prefer
+  /// a root that actually contains the pin file when disambiguating.
   Directory get shorebirdRoot {
     final fromEnv = platform.environment['FLUTTERPATCH_ROOT'];
     if (fromEnv != null && fromEnv.trim().isNotEmpty) {
       return Directory(fromEnv.trim());
     }
 
-    final scriptFile = File(platform.script.toFilePath());
+    final fromScript = _rootFromExecutablePath(platform.script.toFilePath());
+    if (_hasFlutterVersionPin(fromScript)) return fromScript;
+
+    // Off-by-one from legacy parent^3 on `~/.flutterpatch/bin/<exe>` → `$HOME`.
+    final nestedDefault = Directory(p.join(fromScript.path, '.flutterpatch'));
+    if (_hasFlutterVersionPin(nestedDefault)) return nestedDefault;
+
+    final home =
+        platform.environment['HOME'] ?? platform.environment['USERPROFILE'];
+    if (home != null && home.trim().isNotEmpty) {
+      final defaultRoot = Directory(p.join(home.trim(), '.flutterpatch'));
+      if (_hasFlutterVersionPin(defaultRoot)) return defaultRoot;
+    }
+
+    return fromScript;
+  }
+
+  /// Whether [root] looks like a FlutterPatch / Shorebird install.
+  static bool _hasFlutterVersionPin(Directory root) {
+    return File(
+      p.join(root.path, 'bin', 'internal', 'flutter.version'),
+    ).existsSync();
+  }
+
+  /// Derive install root from the running executable / snapshot path.
+  static Directory _rootFromExecutablePath(String executablePath) {
+    final scriptFile = File(executablePath);
     final scriptDir = scriptFile.parent;
     final scriptDirName = p.basename(scriptDir.path);
     final parentDir = scriptDir.parent;
@@ -102,7 +133,7 @@ class ShorebirdEnv {
     }
 
     // Legacy snapshot assumption.
-    return scriptDir.parent.parent.parent;
+    return Directory(scriptDir.parent.parent.parent.path);
   }
 
   /// Whether this install looks like a git checkout (dev / Shorebird-style).

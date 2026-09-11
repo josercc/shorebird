@@ -231,6 +231,8 @@ PY
 
 add_to_path() {
   local bin_dir="$1"
+  local root_dir
+  root_dir="$(cd "$(dirname "$bin_dir")" && pwd)"
   local found_rc=false
   local rc_file
   echo "Adding FlutterPatch to your PATH"
@@ -238,17 +240,23 @@ add_to_path() {
   for rc_file in "$HOME/.bashrc" "$HOME/.zshrc"; do
     if [[ -e "$rc_file" ]]; then
       found_rc=true
-      if grep -Fq "$bin_dir" "$rc_file" 2>/dev/null; then
+      if grep -Fq "FLUTTERPATCH_ROOT=" "$rc_file" 2>/dev/null && grep -Fq "$bin_dir" "$rc_file" 2>/dev/null; then
         echo "Already present in $rc_file"
+      elif grep -Fq "$bin_dir" "$rc_file" 2>/dev/null; then
+        # Older installs only exported PATH; pin the install root too.
+        echo "Updating $rc_file (FLUTTERPATCH_ROOT)"
+        printf '\n# FlutterPatch CLI install root\nexport FLUTTERPATCH_ROOT="%s"\n' "$root_dir" >>"$rc_file"
       else
         echo "Updating $rc_file"
-        printf '\n# FlutterPatch CLI\nexport PATH="%s:$PATH"\n' "$bin_dir" >>"$rc_file"
+        printf '\n# FlutterPatch CLI\nexport FLUTTERPATCH_ROOT="%s"\nexport PATH="%s:$PATH"\n' \
+          "$root_dir" "$bin_dir" >>"$rc_file"
       fi
     fi
   done
 
   if [[ "$found_rc" != true ]]; then
     echo "Unable to determine shell type. Add FlutterPatch to your PATH manually:"
+    echo "  export FLUTTERPATCH_ROOT=\"$root_dir\""
     echo "  export PATH=\"$bin_dir:\$PATH\""
   fi
 }
@@ -466,9 +474,10 @@ RESUME=false
 if [[ -d "$ROOT" ]]; then
   if [[ "$FORCE" == true ]]; then
     echo "Existing install detected. Overwriting (--force)…"
-    # Keep Flutter cache if present to save bandwidth unless force-clean later.
+    # Always keep Flutter cache across CLI reinstalls (--force / upgrade).
+    # --skip-flutter only skips init/bootstrap, not cache preservation.
     TMP_KEEP="$(mktemp -d "${TMPDIR:-/tmp}/flutterpatch-keep.XXXXXX")"
-    if [[ -d "$ROOT/bin/cache/flutter" && "$SKIP_FLUTTER" != true ]]; then
+    if [[ -d "$ROOT/bin/cache/flutter" ]]; then
       mv "$ROOT/bin/cache/flutter" "$TMP_KEEP/flutter" || true
     fi
     rm -rf "$ROOT"
@@ -589,6 +598,7 @@ if [[ "$RELOAD_REQUIRED" == true ]]; then
 
 Close and reopen your terminal to start using FlutterPatch, or run:
 
+  export FLUTTERPATCH_ROOT="$ROOT"
   export PATH="$BIN_DIR:\$PATH"
 
 Then:

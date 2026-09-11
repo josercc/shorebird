@@ -38,6 +38,9 @@ class IosFrameworkReleaser extends Releaser with AppleReleaserMixin {
   String get artifactDisplayName => 'iOS framework';
 
   @override
+  bool get supportsCloneFromRelease => true;
+
+  @override
   ReleaseType get releaseType => ReleaseType.iosFramework;
 
   @override

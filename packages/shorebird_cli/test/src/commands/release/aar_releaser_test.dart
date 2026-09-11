@@ -135,6 +135,12 @@ void main() {
       });
     });
 
+    group('supportsCloneFromRelease', () {
+      test('is true', () {
+        expect(aarReleaser.supportsCloneFromRelease, isTrue);
+      });
+    });
+
     group('assertPreconditions', () {
       group('when validation succeeds', () {
         setUp(() {

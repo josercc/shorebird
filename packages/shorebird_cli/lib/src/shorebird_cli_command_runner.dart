@@ -146,7 +146,10 @@ class ShorebirdCliCommandRunner extends CompletionCommandRunner<int> {
         logger.level = Level.verbose;
       }
 
-      final process = ShorebirdProcess();
+      // Prefer an already-bound ShorebirdProcess (production bootstrap or
+      // tests). Creating a fresh instance here would shadow test mocks and
+      // discard any outer ProcessWrapper wiring.
+      final boundProcess = read(processRef, orElse: ShorebirdProcess.new);
       final shorebirdArtifacts = engineConfig.localEngineSrcPath != null
           ? const ShorebirdLocalEngineArtifacts()
           : const ShorebirdCachedArtifacts();
@@ -158,7 +161,7 @@ class ShorebirdCliCommandRunner extends CompletionCommandRunner<int> {
         values: {
           engineConfigRef.overrideWith(() => engineConfig),
           isJsonModeRef.overrideWith(() => jsonMode),
-          processRef.overrideWith(() => process),
+          processRef.overrideWith(() => boundProcess),
           shorebirdArtifactsRef.overrideWith(() => shorebirdArtifacts),
         },
       );

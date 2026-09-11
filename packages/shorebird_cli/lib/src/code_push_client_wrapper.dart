@@ -937,6 +937,92 @@ aar artifact already exists, continuing...''');
     createArtifactProgress.complete();
   }
 
+  /// Returns all release artifacts for the given [appId], [releaseId], and
+  /// [platform], regardless of architecture.
+  Future<List<ReleaseArtifact>> getAllReleaseArtifacts({
+    required String appId,
+    required int releaseId,
+    required ReleasePlatform platform,
+  }) async {
+    final fetchReleaseArtifactProgress = logger.progress(
+      'Fetching release artifacts',
+    );
+    try {
+      final artifacts = await codePushClient.getReleaseArtifacts(
+        appId: appId,
+        releaseId: releaseId,
+        platform: platform,
+      );
+      fetchReleaseArtifactProgress.complete();
+      return artifacts;
+    } catch (error) {
+      _handleErrorAndExit(error, progress: fetchReleaseArtifactProgress);
+    }
+  }
+
+  /// Downloads every artifact from [sourceReleaseId] and re-uploads them to
+  /// [targetReleaseId] for the same [platform].
+  ///
+  /// Used by `--from-release` to register a new host-app version without
+  /// rebuilding Flutter when the Dart/Flutter code has not changed.
+  Future<void> cloneReleaseArtifacts({
+    required String appId,
+    required int sourceReleaseId,
+    required int targetReleaseId,
+    required ReleasePlatform platform,
+  }) async {
+    final sourceArtifacts = await getAllReleaseArtifacts(
+      appId: appId,
+      releaseId: sourceReleaseId,
+      platform: platform,
+    );
+
+    if (sourceArtifacts.isEmpty) {
+      logger.err(
+        '''No artifacts found on the source release for platform ${platform.name}.''',
+      );
+      throw ProcessExit(ExitCode.software.code);
+    }
+
+    final cloneProgress = logger.progress(
+      'Cloning ${sourceArtifacts.length} artifact(s)',
+    );
+    for (final sourceArtifact in sourceArtifacts) {
+      try {
+        final downloaded = await artifactManager.downloadFile(
+          Uri.parse(sourceArtifact.url),
+        );
+        final hash = sha256.convert(await downloaded.readAsBytes()).toString();
+        logger.detail(
+          'Uploading cloned ${sourceArtifact.arch} artifact '
+          '(hash=$hash)',
+        );
+        await codePushClient.createReleaseArtifact(
+          appId: appId,
+          releaseId: targetReleaseId,
+          artifactPath: downloaded.path,
+          arch: sourceArtifact.arch,
+          platform: platform,
+          hash: hash,
+          canSideload: sourceArtifact.canSideload,
+          podfileLockHash: sourceArtifact.podfileLockHash,
+        );
+      } on CodePushConflictException catch (_) {
+        logger.info('''
+
+${sourceArtifact.arch} artifact already exists, continuing...''');
+      } catch (error) {
+        _handleErrorAndExit(
+          error,
+          progress: cloneProgress,
+          message:
+              'Error cloning ${sourceArtifact.arch} artifact: $error',
+        );
+      }
+    }
+    cloneProgress.complete();
+  }
+
   /// Zips and uploads a release xcframework and supplementary files to the
   /// Shorebird server.
   Future<void> createIosFrameworkReleaseArtifacts({

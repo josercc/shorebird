@@ -14,6 +14,7 @@ import 'package:shorebird_cli/src/shorebird_cli_command_runner.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
 import 'package:shorebird_cli/src/shorebird_env.dart';
 import 'package:shorebird_cli/src/shorebird_flutter.dart';
+import 'package:shorebird_cli/src/shorebird_process.dart';
 import 'package:shorebird_cli/src/shorebird_version.dart';
 import 'package:shorebird_cli/src/third_party/flutter_tools/lib/flutter_tools.dart';
 import 'package:shorebird_cli/src/version.dart';
@@ -32,6 +33,7 @@ void main() {
     late Platform platform;
     late ShorebirdEnv shorebirdEnv;
     late ShorebirdFlutter shorebirdFlutter;
+    late ShorebirdProcess shorebirdProcess;
     late ShorebirdVersion shorebirdVersion;
     late ShorebirdCliCommandRunner commandRunner;
 
@@ -41,6 +43,7 @@ void main() {
         values: {
           loggerRef.overrideWith(() => logger),
           platformRef.overrideWith(() => platform),
+          processRef.overrideWith(() => shorebirdProcess),
           shorebirdEnvRef.overrideWith(() => shorebirdEnv),
           shorebirdFlutterRef.overrideWith(() => shorebirdFlutter),
           shorebirdVersionRef.overrideWith(() => shorebirdVersion),
@@ -53,8 +56,17 @@ void main() {
       platform = MockPlatform();
       shorebirdEnv = MockShorebirdEnv();
       shorebirdFlutter = MockShorebirdFlutter();
+      shorebirdProcess = MockShorebirdProcess();
       shorebirdVersion = MockShorebirdVersion();
       when(() => logger.level).thenReturn(Level.info);
+      when(() => platform.environment).thenReturn(const {});
+      when(
+        () => shorebirdProcess.stream(
+          any(),
+          any(),
+          environment: any(named: 'environment'),
+        ),
+      ).thenAnswer((_) async => ExitCode.success.code);
       final logFile = MockFile();
       when(
         () => shorebirdEnv.logsDirectory,
@@ -65,6 +77,7 @@ void main() {
         () => shorebirdEnv.shorebirdEngineRevision,
       ).thenReturn(shorebirdEngineRevision);
       when(() => platform.isWindows).thenReturn(false);
+      when(() => shorebirdEnv.isGitInstall).thenReturn(true);
       when(() => shorebirdEnv.flutterRevision).thenReturn(flutterRevision);
       when(
         () => shorebirdFlutter.getVersionString(),
@@ -323,16 +336,6 @@ Engine • revision $shorebirdEngineRevision'''),
 
     group('update check', () {
       group('when running upgrade command', () {
-        setUp(() {
-          when(() => logger.progress(any())).thenReturn(MockProgress());
-          when(() => shorebirdEnv.isGitInstall).thenReturn(true);
-          when(
-            shorebirdVersion.fetchCurrentGitHash,
-          ).thenAnswer((_) async => 'current');
-          when(
-            shorebirdVersion.fetchLatestGitHash,
-          ).thenAnswer((_) async => 'current');
-        });
         test('does not check for update', () async {
           final result = await runWithOverrides(
             () => commandRunner.run(['upgrade']),

@@ -141,6 +141,43 @@ void main() {
           equals(overrideRoot.path),
         );
       });
+
+      test('recovers when legacy parent^3 lands on HOME', () {
+        // Old Shorebird heuristic: exe at $HOME/.flutterpatch/bin/flutterpatch
+        // → parent^3 = $HOME, missing bin/internal/flutter.version there.
+        final home = Directory.systemTemp.createTempSync();
+        final installRoot = Directory(p.join(home.path, '.flutterpatch'))
+          ..createSync();
+        File(p.join(installRoot.path, 'bin', 'internal', 'flutter.version'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync(flutterRevision, flush: true);
+        when(() => platform.environment).thenReturn({'HOME': home.path});
+        // Pretend resolution incorrectly returned $HOME (legacy off-by-one).
+        when(() => platform.script).thenReturn(
+          Uri.file(p.join(home.path, 'bin', 'flutterpatch')),
+        );
+        expect(
+          runWithOverrides(() => shorebirdEnv.shorebirdRoot.path),
+          equals(installRoot.path),
+        );
+      });
+
+      test('falls back to ~/.flutterpatch when script root has no pin', () {
+        final home = Directory.systemTemp.createTempSync();
+        final installRoot = Directory(p.join(home.path, '.flutterpatch'))
+          ..createSync();
+        File(p.join(installRoot.path, 'bin', 'internal', 'flutter.version'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync(flutterRevision, flush: true);
+        when(() => platform.environment).thenReturn({'HOME': home.path});
+        when(
+          () => platform.script,
+        ).thenReturn(Uri.file(p.join(home.path, 'unrelated', 'tool')));
+        expect(
+          runWithOverrides(() => shorebirdEnv.shorebirdRoot.path),
+          equals(installRoot.path),
+        );
+      });
     });
 
     group('isGitInstall', () {

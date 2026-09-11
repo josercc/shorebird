@@ -156,6 +156,11 @@ function Resolve-FromCatalog {
 
 function Add-FlutterPatchToPath {
   param([string]$BinDir)
+  $rootDir = Split-Path -Parent $BinDir
+  [Environment]::SetEnvironmentVariable("FLUTTERPATCH_ROOT", $rootDir, "User")
+  $env:FLUTTERPATCH_ROOT = $rootDir
+  Write-Host "Set User FLUTTERPATCH_ROOT: $rootDir"
+
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
   if (-not $userPath) { $userPath = "" }
   $parts = $userPath -split ";" | Where-Object { $_ -and $_.Trim() }
@@ -309,9 +314,11 @@ $Resume = $false
 if (Test-Path $Root) {
   if ($Force) {
     Write-Host "Existing install detected. Overwriting (-Force)…"
+    # Always keep Flutter cache across CLI reinstalls (-Force / upgrade).
+    # -SkipFlutter only skips init/bootstrap, not cache preservation.
     $keepFlutter = $null
     $flutterCache = Join-Path $Root "bin\cache\flutter"
-    if ((-not $SkipFlutter) -and (Test-Path $flutterCache)) {
+    if (Test-Path $flutterCache) {
       $keepFlutter = Join-Path $env:TEMP ("flutterpatch-keep-" + [guid]::NewGuid().ToString("N"))
       New-Item -ItemType Directory -Force -Path $keepFlutter | Out-Null
       Move-Item $flutterCache (Join-Path $keepFlutter "flutter")

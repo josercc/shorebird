@@ -131,6 +131,12 @@ void main() {
       });
     });
 
+    group('supportsCloneFromRelease', () {
+      test('is true', () {
+        expect(iosFrameworkReleaser.supportsCloneFromRelease, isTrue);
+      });
+    });
+
     group('assertArgsAreValid', () {
       group('when split-per-abi is true', () {
         setUp(() {
