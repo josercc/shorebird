@@ -859,6 +859,14 @@ $exception'''),
             platform: any(named: 'platform'),
           ),
         ).thenAnswer((_) async {});
+        when(
+          () => codePushClientWrapper.cloneReleaseBaselines(
+            appId: any(named: 'appId'),
+            sourceReleaseVersion: any(named: 'sourceReleaseVersion'),
+            targetReleaseVersion: any(named: 'targetReleaseVersion'),
+            platform: any(named: 'platform'),
+          ),
+        ).thenAnswer((_) async {});
       });
 
       test('clones artifacts without building', () async {
@@ -877,6 +885,14 @@ $exception'''),
             sourceReleaseId: sourceRelease.id,
             targetReleaseId: clonedRelease.id,
             platform: ReleasePlatform.android,
+          ),
+        ).called(1);
+        verify(
+          () => codePushClientWrapper.cloneReleaseBaselines(
+            appId: appId,
+            sourceReleaseVersion: fromVersion,
+            targetReleaseVersion: targetVersion,
+            platform: ReleasePlatform.android.name,
           ),
         ).called(1);
         verify(

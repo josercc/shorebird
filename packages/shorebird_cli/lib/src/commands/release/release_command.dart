@@ -489,6 +489,7 @@ Create a full release for $fromReleaseVersion first, or pick another --from-rele
       '''
 Cloning ${releaser.artifactDisplayName} artifacts from release ${lightCyan.wrap(fromReleaseVersion)}
 → ${lightCyan.wrap(releaseVersion)} (skipping Flutter build).
+Also cloning OTA snapshot and resource config baselines when present.
 Reuse your existing local ${lightCyan.wrap('release/')} artifacts in the host app; Flutter did not change.
 ''',
     );
@@ -534,6 +535,15 @@ Reuse your existing local ${lightCyan.wrap('release/')} artifacts in the host ap
           sourceReleaseId: sourceRelease.id,
           targetReleaseId: release.id,
           platform: releasePlatform,
+        );
+        // Also copy OTA snapshot + resource config so check-ota / asset
+        // diffs keep working against the new host-app version.
+        // flutterpatch: ownership=FORK — from meta_ota
+        await codePushClientWrapper.cloneReleaseBaselines(
+          appId: appId,
+          sourceReleaseVersion: fromReleaseVersion,
+          targetReleaseVersion: releaseVersion,
+          platform: releasePlatform.name,
         );
         await finalizeRelease(release: release, releaser: releaser);
 

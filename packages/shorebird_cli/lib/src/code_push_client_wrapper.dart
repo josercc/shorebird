@@ -1,6 +1,7 @@
 // cspell:words endtemplate pubspec sideloadable bryanoltman archs sideload
 // cspell:words xcarchive codesigned xcframework
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:collection/collection.dart';
@@ -1022,6 +1023,156 @@ ${sourceArtifact.arch} artifact already exists, continuing...''');
       }
     }
     cloneProgress.complete();
+  }
+
+  /// Copies the latest active OTA snapshot and resource config from
+  /// [sourceReleaseVersion] onto [targetReleaseVersion] for [platform].
+  ///
+  /// Used by `--from-release` so host-app version bumps keep the same OTA
+  /// baselines as the Flutter artifacts they reuse. Content-addressed asset
+  /// blobs are shared by hash and do not need re-uploading.
+  ///
+  /// Soft-fails (logs a warning) when the source has no baselines or when
+  /// upload fails, so a missing OTA baseline does not undo a successful
+  /// artifact clone.
+  // flutterpatch: ownership=FORK — from meta_ota
+  Future<void> cloneReleaseBaselines({
+    required String appId,
+    required String sourceReleaseVersion,
+    required String targetReleaseVersion,
+    required String platform,
+  }) async {
+    final progress = logger.progress('Cloning OTA baselines');
+    try {
+      var clonedSnapshot = false;
+      var clonedResources = false;
+
+      final snapshots = await codePushClient.listOtaSnapshots(
+        appId: appId,
+        releaseVersion: sourceReleaseVersion,
+        platform: platform,
+      );
+      final activeSnapshot = _latestActiveBaseline(snapshots);
+      if (activeSnapshot != null) {
+        final id = activeSnapshot['id'] as String;
+        final bytes = await codePushClient.getOtaSnapshotContent(id);
+        final decoded = jsonDecode(utf8.decode(bytes));
+        final fileCount = decoded is Map && decoded['files'] is List
+            ? (decoded['files'] as List).length
+            : (activeSnapshot['file_count'] as num?)?.toInt();
+        final channel =
+            activeSnapshot['channel'] as String? ?? 'stable';
+        await codePushClient.uploadOtaSnapshot(
+          appId: appId,
+          releaseVersion: targetReleaseVersion,
+          contentBytes: bytes,
+          platform: platform,
+          channel: channel,
+          notes: 'Cloned from $sourceReleaseVersion',
+          fileCount: fileCount,
+        );
+        clonedSnapshot = true;
+        logger.detail(
+          'Cloned OTA snapshot #${activeSnapshot['number']} '
+          '→ $targetReleaseVersion',
+        );
+      }
+
+      final resources = await codePushClient.listResourceSnapshots(
+        appId: appId,
+        releaseVersion: sourceReleaseVersion,
+        platform: platform,
+      );
+      final activeResource = _latestActiveBaseline(resources);
+      if (activeResource != null) {
+        final id = activeResource['id'] as String;
+        final sourceBytes = await codePushClient.getResourceSnapshotContent(
+          id,
+        );
+        final contentBytes = _rewriteResourceReleaseVersion(
+          sourceBytes,
+          targetReleaseVersion,
+        );
+        final decoded = jsonDecode(utf8.decode(contentBytes));
+        final resourceCount = decoded is Map && decoded['resources'] is List
+            ? (decoded['resources'] as List).length
+            : (activeResource['resource_count'] as num?)?.toInt();
+        final channel =
+            activeResource['channel'] as String? ?? 'stable';
+        await codePushClient.uploadResourceSnapshot(
+          appId: appId,
+          releaseVersion: targetReleaseVersion,
+          contentBytes: contentBytes,
+          platform: platform,
+          channel: channel,
+          notes: 'Cloned from $sourceReleaseVersion',
+          resourceCount: resourceCount,
+        );
+        clonedResources = true;
+        logger.detail(
+          'Cloned resource config #${activeResource['number']} '
+          '→ $targetReleaseVersion',
+        );
+      }
+
+      if (!clonedSnapshot && !clonedResources) {
+        progress.complete(
+          'No OTA baselines on source release $sourceReleaseVersion',
+        );
+        logger.info(
+          '''
+Source release has no published OTA snapshot or resource config.
+After cloning you can still upload baselines with:
+  flutterpatch upload-snapshot --version $targetReleaseVersion --platform $platform
+  flutterpatch upload-resources --version $targetReleaseVersion --platform $platform''',
+        );
+        return;
+      }
+
+      final parts = <String>[
+        if (clonedSnapshot) 'snapshot',
+        if (clonedResources) 'resource config',
+      ];
+      progress.complete('Cloned OTA ${parts.join(' + ')}');
+    } on Exception catch (error) {
+      progress.fail('Failed to clone OTA baselines: $error');
+      logger.info(
+        '''
+Release artifacts were cloned; re-run baselines manually:
+  flutterpatch upload-snapshot --version $targetReleaseVersion --platform $platform
+  flutterpatch upload-resources --version $targetReleaseVersion --platform $platform''',
+      );
+    }
+  }
+
+  /// Newest non-rolled-back baseline row, or null if none.
+  Map<String, dynamic>? _latestActiveBaseline(
+    List<Map<String, dynamic>> rows,
+  ) {
+    final active = rows
+        .where((e) => e['rolled_back'] != true && e['rolled_back'] != 1)
+        .toList()
+      ..sort(
+        (a, b) => ((b['number'] as num?)?.toInt() ?? 0).compareTo(
+          (a['number'] as num?)?.toInt() ?? 0,
+        ),
+      );
+    return active.firstOrNull;
+  }
+
+  /// Rewrites `release_version` inside a resource snapshot JSON payload.
+  List<int> _rewriteResourceReleaseVersion(
+    List<int> bytes,
+    String releaseVersion,
+  ) {
+    final decoded = jsonDecode(utf8.decode(bytes));
+    if (decoded is! Map) return bytes;
+    final map = Map<String, dynamic>.from(decoded);
+    if (map['release_version'] == releaseVersion) return bytes;
+    map['release_version'] = releaseVersion;
+    return utf8.encode(
+      '${const JsonEncoder.withIndent('  ').convert(map)}\n',
+    );
   }
 
   /// Zips and uploads a release xcframework and supplementary files to the

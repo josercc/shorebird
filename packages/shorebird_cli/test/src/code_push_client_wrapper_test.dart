@@ -2782,6 +2782,251 @@ Please bump your version number and try again.''',
       });
     });
 
+    group('cloneReleaseBaselines', () {
+      const sourceVersion = '1.0.0+1';
+      const targetVersion = '1.0.0+2';
+      const platformName = 'android';
+      final snapshotBytes = utf8.encode(
+        jsonEncode({
+          'version': 2,
+          'files': [
+            {'path': 'lib/main.dart', 'hash': 'abc', 'size': 1, 'category': 'flutter_dart'},
+          ],
+        }),
+      );
+      final resourceBytes = utf8.encode(
+        jsonEncode({
+          'release_version': sourceVersion,
+          'resources': [
+            {
+              'package': 'app',
+              'package_hash': null,
+              'path': 'assets/a.png',
+              'size': 10,
+              'hash': 'def',
+            },
+          ],
+        }),
+      );
+
+      setUp(() {
+        when(
+          () => codePushClient.listOtaSnapshots(
+            appId: any(named: 'appId'),
+            releaseVersion: any(named: 'releaseVersion'),
+            platform: any(named: 'platform'),
+          ),
+        ).thenAnswer((_) async => []);
+        when(
+          () => codePushClient.listResourceSnapshots(
+            appId: any(named: 'appId'),
+            releaseVersion: any(named: 'releaseVersion'),
+            platform: any(named: 'platform'),
+          ),
+        ).thenAnswer((_) async => []);
+      });
+
+      test('completes when source has no baselines', () async {
+        await runWithOverrides(
+          () => codePushClientWrapper.cloneReleaseBaselines(
+            appId: app.appId,
+            sourceReleaseVersion: sourceVersion,
+            targetReleaseVersion: targetVersion,
+            platform: platformName,
+          ),
+        );
+
+        verifyNever(
+          () => codePushClient.uploadOtaSnapshot(
+            appId: any(named: 'appId'),
+            releaseVersion: any(named: 'releaseVersion'),
+            contentBytes: any(named: 'contentBytes'),
+            platform: any(named: 'platform'),
+            channel: any(named: 'channel'),
+            notes: any(named: 'notes'),
+            fileCount: any(named: 'fileCount'),
+          ),
+        );
+        verifyNever(
+          () => codePushClient.uploadResourceSnapshot(
+            appId: any(named: 'appId'),
+            releaseVersion: any(named: 'releaseVersion'),
+            contentBytes: any(named: 'contentBytes'),
+            platform: any(named: 'platform'),
+            channel: any(named: 'channel'),
+            notes: any(named: 'notes'),
+            resourceCount: any(named: 'resourceCount'),
+          ),
+        );
+        verify(
+          () => progress.complete(
+            'No OTA baselines on source release $sourceVersion',
+          ),
+        ).called(1);
+      });
+
+      test('re-uploads latest snapshot and resource config', () async {
+        when(
+          () => codePushClient.listOtaSnapshots(
+            appId: app.appId,
+            releaseVersion: sourceVersion,
+            platform: platformName,
+          ),
+        ).thenAnswer(
+          (_) async => [
+            {
+              'id': 'snap-old',
+              'number': 1,
+              'channel': 'stable',
+              'rolled_back': false,
+            },
+            {
+              'id': 'snap-new',
+              'number': 2,
+              'channel': 'stable',
+              'rolled_back': false,
+            },
+          ],
+        );
+        when(
+          () => codePushClient.getOtaSnapshotContent('snap-new'),
+        ).thenAnswer((_) async => snapshotBytes);
+        when(
+          () => codePushClient.uploadOtaSnapshot(
+            appId: any(named: 'appId'),
+            releaseVersion: any(named: 'releaseVersion'),
+            contentBytes: any(named: 'contentBytes'),
+            platform: any(named: 'platform'),
+            channel: any(named: 'channel'),
+            notes: any(named: 'notes'),
+            fileCount: any(named: 'fileCount'),
+          ),
+        ).thenAnswer((_) async => {'id': 'snap-cloned', 'number': 1});
+
+        when(
+          () => codePushClient.listResourceSnapshots(
+            appId: app.appId,
+            releaseVersion: sourceVersion,
+            platform: platformName,
+          ),
+        ).thenAnswer(
+          (_) async => [
+            {
+              'id': 'res-1',
+              'number': 1,
+              'channel': 'stable',
+              'rolled_back': false,
+            },
+          ],
+        );
+        when(
+          () => codePushClient.getResourceSnapshotContent('res-1'),
+        ).thenAnswer((_) async => resourceBytes);
+        when(
+          () => codePushClient.uploadResourceSnapshot(
+            appId: any(named: 'appId'),
+            releaseVersion: any(named: 'releaseVersion'),
+            contentBytes: any(named: 'contentBytes'),
+            platform: any(named: 'platform'),
+            channel: any(named: 'channel'),
+            notes: any(named: 'notes'),
+            resourceCount: any(named: 'resourceCount'),
+          ),
+        ).thenAnswer((_) async => {'id': 'res-cloned', 'number': 1});
+
+        await runWithOverrides(
+          () => codePushClientWrapper.cloneReleaseBaselines(
+            appId: app.appId,
+            sourceReleaseVersion: sourceVersion,
+            targetReleaseVersion: targetVersion,
+            platform: platformName,
+          ),
+        );
+
+        verify(
+          () => codePushClient.getOtaSnapshotContent('snap-new'),
+        ).called(1);
+        verify(
+          () => codePushClient.uploadOtaSnapshot(
+            appId: app.appId,
+            releaseVersion: targetVersion,
+            contentBytes: snapshotBytes,
+            platform: platformName,
+            channel: 'stable',
+            notes: 'Cloned from $sourceVersion',
+            fileCount: 1,
+          ),
+        ).called(1);
+
+        final uploadedResource =
+            verify(
+                  () => codePushClient.uploadResourceSnapshot(
+                    appId: app.appId,
+                    releaseVersion: targetVersion,
+                    contentBytes: captureAny(named: 'contentBytes'),
+                    platform: platformName,
+                    channel: 'stable',
+                    notes: 'Cloned from $sourceVersion',
+                    resourceCount: 1,
+                  ),
+                ).captured.single
+                as List<int>;
+        final rewritten =
+            jsonDecode(utf8.decode(uploadedResource)) as Map<String, dynamic>;
+        expect(rewritten['release_version'], targetVersion);
+
+        verify(
+          () => progress.complete('Cloned OTA snapshot + resource config'),
+        ).called(1);
+      });
+
+      test('soft-fails when upload throws', () async {
+        when(
+          () => codePushClient.listOtaSnapshots(
+            appId: app.appId,
+            releaseVersion: sourceVersion,
+            platform: platformName,
+          ),
+        ).thenAnswer(
+          (_) async => [
+            {
+              'id': 'snap-1',
+              'number': 1,
+              'channel': 'stable',
+              'rolled_back': false,
+            },
+          ],
+        );
+        when(
+          () => codePushClient.getOtaSnapshotContent('snap-1'),
+        ).thenAnswer((_) async => snapshotBytes);
+        when(
+          () => codePushClient.uploadOtaSnapshot(
+            appId: any(named: 'appId'),
+            releaseVersion: any(named: 'releaseVersion'),
+            contentBytes: any(named: 'contentBytes'),
+            platform: any(named: 'platform'),
+            channel: any(named: 'channel'),
+            notes: any(named: 'notes'),
+            fileCount: any(named: 'fileCount'),
+          ),
+        ).thenThrow(Exception('upload failed'));
+
+        await runWithOverrides(
+          () => codePushClientWrapper.cloneReleaseBaselines(
+            appId: app.appId,
+            sourceReleaseVersion: sourceVersion,
+            targetReleaseVersion: targetVersion,
+            platform: platformName,
+          ),
+        );
+
+        verify(
+          () => progress.fail(any(that: contains('Failed to clone OTA baselines'))),
+        ).called(1);
+      });
+    });
+
     group('updateReleaseStatus', () {
       test('exits with code 70 when updating release status fails', () async {
         when(
