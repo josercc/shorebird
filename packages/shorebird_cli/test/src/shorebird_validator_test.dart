@@ -79,6 +79,10 @@ void main() {
       test('throws UserNotAuthorizedException '
           'when user is not authenticated', () async {
         when(() => auth.isAuthenticated).thenReturn(false);
+        when(() => shorebirdEnv.hostedUri).thenReturn(null);
+        when(
+          () => auth.credentialsFilePath,
+        ).thenReturn('/tmp/credentials.json');
         await expectLater(
           runWithOverrides(
             () => shorebirdValidator.validatePreconditions(
@@ -87,12 +91,37 @@ void main() {
           ),
           throwsA(isA<UserNotAuthorizedException>()),
         );
-        verifyInOrder([
+        verify(
           () => logger.err('You must be authenticated to run this command.'),
-          () => logger.info(
-            '''Set ${lightCyan.wrap('FLUTTERPATCH_TOKEN')} to an admin or API token.''',
+        ).called(1);
+        verify(
+          () => logger.info(any(that: contains('FLUTTERPATCH_TOKEN'))),
+        ).called(1);
+      });
+
+      test('mentions base_url when unauthenticated with shorebird.yaml',
+          () async {
+        when(() => auth.isAuthenticated).thenReturn(false);
+        when(
+          () => shorebirdEnv.hostedUri,
+        ).thenReturn(Uri.parse('https://api.example.com'));
+        when(
+          () => auth.credentialsFilePath,
+        ).thenReturn('/tmp/credentials.json');
+        await expectLater(
+          runWithOverrides(
+            () => shorebirdValidator.validatePreconditions(
+              checkUserIsAuthenticated: true,
+            ),
           ),
-        ]);
+          throwsA(isA<UserNotAuthorizedException>()),
+        );
+        verify(
+          () => logger.info(any(that: contains('https://api.example.com'))),
+        ).called(1);
+        verify(
+          () => logger.info(any(that: contains('account login'))),
+        ).called(1);
       });
 
       group(

@@ -46,7 +46,8 @@ flavors:
     description:
         'Base URL used to check for updates and talk to the FlutterPatch '
         'control API. Written by `flutterpatch init` when a control API URL '
-        'is provided.',
+        'is provided. Also used as the key when looking up a local API token '
+        'in the credentials file (after FLUTTERPATCH_TOKEN).',
     defaultValue: 'none',
     example: 'https://api.example.com',
     values: null,

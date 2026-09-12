@@ -77,11 +77,23 @@ class ShorebirdValidator {
     }
 
     if (checkUserIsAuthenticated && !auth.isAuthenticated) {
-      logger
-        ..err('You must be authenticated to run this command.')
-        ..info(
-          '''Set ${lightCyan.wrap('FLUTTERPATCH_TOKEN')} to an admin or API token.''',
+      final baseUrl = shorebirdEnv.hostedUri;
+      logger.err('You must be authenticated to run this command.');
+      if (baseUrl != null) {
+        logger.info(
+          '''
+Set ${lightCyan.wrap(shorebirdTokenEnvVar)} (preferred), or save a token for
+${lightCyan.wrap(normalizeAuthUrl(baseUrl))} with ${lightCyan.wrap('flutterpatch account login')}.
+Local credentials file: ${auth.credentialsFilePath}''',
         );
+      } else {
+        logger.info(
+          '''
+Set ${lightCyan.wrap(shorebirdTokenEnvVar)} to an admin or API token,
+or set ${lightCyan.wrap('base_url')} in shorebird.yaml and run
+${lightCyan.wrap('flutterpatch account login')}.''',
+        );
+      }
       throw UserNotAuthorizedException();
     }
 

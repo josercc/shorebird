@@ -373,7 +373,8 @@ Reference the following commands to get started:
 📦 To create a new release use: "${lightCyan.wrap('flutterpatch release')}".
 🚀 To push an update use: "${lightCyan.wrap('flutterpatch patch')}".
 
-Auth: export ${lightCyan.wrap('FLUTTERPATCH_TOKEN')}=<token>
+Auth (preferred): export ${lightCyan.wrap('FLUTTERPATCH_TOKEN')}=<token>
+Or save a local token for this base_url: ${lightCyan.wrap('flutterpatch account login')}
 ''',
     );
 
