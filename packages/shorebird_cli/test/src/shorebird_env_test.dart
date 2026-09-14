@@ -796,6 +796,17 @@ test-revision
           equals(override),
         );
       });
+
+      test('setFlutterRevision writes and reads back the pin', () {
+        runWithOverrides(() {
+          shorebirdEnv.setFlutterRevision('new-revision');
+          expect(shorebirdEnv.flutterRevision, equals('new-revision'));
+          expect(
+            shorebirdEnv.flutterVersionFile.readAsStringSync().trim(),
+            equals('new-revision'),
+          );
+        });
+      });
     });
 
     group('usesShorebirdCodePushPackage', () {

@@ -11,5 +11,13 @@ void main() {
         equals('Manage your FlutterPatch Flutter installation.'),
       );
     });
+
+    test('registers install and use subcommands', () {
+      final command = FlutterCommand();
+      expect(
+        command.subcommands.keys,
+        containsAll(['versions', 'config', 'install', 'use']),
+      );
+    });
   });
 }

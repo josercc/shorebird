@@ -18,10 +18,9 @@
 #
 # One-click install (after publishing to cli_releases):
 #   curl -fsSL https://<site>/downloads/install_cli.sh | bash
-#   ./scripts/install.sh --archive dist/cli/flutterpatch-cli-*.tar.gz --force
 #
 # Manual: extract to ~/.flutterpatch, add .../bin to PATH.
-# Install script (or first release/patch) places Flutter under bin/cache/.
+# Flutter SDKs: flutterpatch flutter install|use <version>
 
 set -euo pipefail
 
@@ -125,9 +124,9 @@ macOS / Linux:
 Windows (PowerShell):
   iwr -UseBasicParsing https://<your-site>/downloads/install_cli.ps1 | iex
 
-Dev / offline (this archive):
-  ./scripts/install.sh --archive <this-file> --force
-  .\\scripts\\install.ps1 -Archive <this-file> -Force
+Dev / offline: extract this archive manually (see below).
+install.sh / install.ps1 skip if the CLI binary already exists;
+use --force / -Force to upgrade.
 
 Manual install
 --------------
@@ -137,6 +136,7 @@ Manual install
 2. Add the bin/ directory to your PATH.
 3. Open a new terminal and run:
      flutterpatch --help
+     flutterpatch flutter use <version>
      flutterpatch doctor
 
 Notes

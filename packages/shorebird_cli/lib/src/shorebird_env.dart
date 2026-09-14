@@ -155,17 +155,33 @@ class ShorebirdEnv {
     }
   }
 
+  /// File that pins the default Shorebird Flutter revision.
+  File get flutterVersionFile {
+    return File(
+      p.join(shorebirdRoot.path, 'bin', 'internal', 'flutter.version'),
+    );
+  }
+
   /// Get the Shorebird Flutter revision.
   String get flutterRevision {
     if (_flutterRevisionOverride != null) return _flutterRevisionOverride;
-    final file = File(
-      p.join(shorebirdRoot.path, 'bin', 'internal', 'flutter.version'),
-    );
+    final file = flutterVersionFile;
     try {
       return file.readAsStringSync().trim();
     } on FileSystemException {
       throw CacheCorruptedException('Could not read ${file.path}.');
     }
+  }
+
+  /// Persist [revision] as the default Shorebird Flutter revision.
+  ///
+  /// Writes to [flutterVersionFile]. Does not install the SDK; callers that
+  /// need a usable checkout should call `ShorebirdFlutter.installRevision`
+  /// first.
+  void setFlutterRevision(String revision) {
+    final file = flutterVersionFile;
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync('$revision\n', flush: true);
   }
 
   /// Whether the project uses package:shorebird_code_push.
