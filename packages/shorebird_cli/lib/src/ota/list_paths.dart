@@ -6,14 +6,16 @@ import 'package:shorebird_cli/src/ota/ignore_rules.dart';
 /// Log whether an ignore file was loaded (stderr).
 void printIgnoreNotice(FlutterPatchIgnore ignore) {
   if (ignore.filePath != null) {
+    final scope = ignore.platform != null ? ', platform=${ignore.platform}' : '';
     stderr.writeln(
       '==> Loaded ignore rules: ${ignore.filePath} '
-      '(${ignore.ruleCount} rules)',
+      '(${ignore.ruleCount} rules$scope)',
     );
   } else {
     stderr.writeln(
       '==> No $flutterPatchIgnoreFileName '
-      '(add one at the project root to exclude paths)',
+      '(add one at the project root to exclude paths; '
+      'use [android]/[ios] sections for platform-specific rules)',
     );
   }
 }

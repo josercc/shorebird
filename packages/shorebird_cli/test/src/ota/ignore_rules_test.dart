@@ -8,6 +8,17 @@ import 'package:test/test.dart';
 
 void main() {
   group('FlutterPatchIgnore', () {
+    test('isIgnoredSnapshotPath also matches package-relative path', () {
+      final ignore = FlutterPatchIgnore.parse('android/**\n');
+      expect(
+        ignore.isIgnoredSnapshotPath(
+          'package:dep_pkg/android/src/main/java/P.java',
+        ),
+        isTrue,
+      );
+      expect(ignore.isIgnoredSnapshotPath('package:dep_pkg/lib/x.dart'), isFalse);
+    });
+
     test('parses comments and blank lines', () {
       final ignore = FlutterPatchIgnore.parse('''
 # comment
@@ -23,6 +34,41 @@ package:foo/**
       expect(ignore.isIgnored('lib/foo.g.dart'), isTrue);
       expect(ignore.isIgnored('package:foo/lib/x.dart'), isTrue);
       expect(ignore.isIgnored('package:bar/lib/x.dart'), isFalse);
+    });
+
+    test('platform sections filter rules by platform', () {
+      const contents = '''
+# shared
+unityLibrary
+
+[android]
+android/key.properties
+GeneratedPluginRegistrant.java
+
+[ios]
+frameworks/
+Pods/
+''';
+      final android = FlutterPatchIgnore.parse(contents, platform: 'android');
+      expect(android.platform, 'android');
+      expect(android.isIgnored('unityLibrary/x.so'), isTrue);
+      expect(android.isIgnored('android/key.properties'), isTrue);
+      expect(android.isIgnored('GeneratedPluginRegistrant.java'), isTrue);
+      expect(android.isIgnored('frameworks/Foo.framework/Foo'), isFalse);
+      expect(android.isIgnored('Pods/Headers/x.h'), isFalse);
+
+      final ios = FlutterPatchIgnore.parse(contents, platform: 'ios');
+      expect(ios.platform, 'ios');
+      expect(ios.isIgnored('unityLibrary/x.so'), isTrue);
+      expect(ios.isIgnored('frameworks/Foo.framework/Foo'), isTrue);
+      expect(ios.isIgnored('Pods/Headers/x.h'), isTrue);
+      expect(ios.isIgnored('android/key.properties'), isFalse);
+      expect(ios.isIgnored('GeneratedPluginRegistrant.java'), isFalse);
+
+      // No platform → all sections apply.
+      final all = FlutterPatchIgnore.parse(contents);
+      expect(all.isIgnored('android/key.properties'), isTrue);
+      expect(all.isIgnored('frameworks/Foo.framework/Foo'), isTrue);
     });
 
     test('supports negation', () {
@@ -130,6 +176,46 @@ packages:
 ''');
       return flutter;
     }
+
+    test('compare skips paths ignored locally even if in baseline', () async {
+      final flutter = await makeApp();
+      final android = Directory(p.join(tmp.path, 'android'))..createSync();
+      File(p.join(android.path, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('class MainActivity');
+      File(p.join(android.path, 'unityLibrary', 'src', 'Foo.java'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('class Foo {}');
+
+      final out = p.join(tmp.path, 'snap.json');
+      await checkOta(
+        flutterDir: flutter.path,
+        androidDir: android.path,
+        outPath: out,
+      );
+
+      // After baseline includes unityLibrary, ignore it locally.
+      File(p.join(flutter.path, '.flutterpatchignore'))
+          .writeAsStringSync('unityLibrary\n');
+      File(p.join(android.path, 'unityLibrary', 'src', 'Foo.java'))
+          .writeAsStringSync('class Foo { void changed() {} }');
+
+      final result = await checkOta(
+        flutterDir: flutter.path,
+        androidDir: android.path,
+        outPath: out,
+        writeSnapshot: false,
+      );
+
+      expect(
+        result.changes.any((c) => c.path.contains('unityLibrary')),
+        isFalse,
+        reason: 'ignored paths must not participate in comparison',
+      );
+      expect(result.blockingChanges, isEmpty);
+      expect(result.hasChanges, isFalse);
+      expect(result.otaSupported, isFalse);
+    });
 
     test('checkOta skips ignored dart and assets', () async {
       final flutter = await makeApp();

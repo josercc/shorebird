@@ -160,7 +160,12 @@ More info: ${troubleshootingUrl.toLink()}.
     if (hasExplicitAssetDiff) {
       final next = loadScannedAssetsFromFile(assetsPath);
       final baseline = loadScannedAssetsFromFile(baselinePath);
-      var changes = diffScannedAssets(baseline: baseline, next: next);
+      final ignore = FlutterPatchIgnore.load(_flutterProjectDir);
+      var changes = diffScannedAssets(
+        baseline: baseline,
+        next: next,
+        ignore: ignore,
+      );
       if (changes.isNotEmpty && _shouldUploadChangedAssets) {
         logger.info('Uploading changed Flutter assets to control plane…');
         changes = await uploadChangedResourcesToControl(
@@ -241,13 +246,16 @@ More info: ${troubleshootingUrl.toLink()}.
       }
 
       final flutterDir = _flutterProjectDir;
+      final ignore = FlutterPatchIgnore.load(flutterDir);
       final scanned = await scanFlutterAssets(
         appDir: flutterDir,
         releaseVersion: releaseVersion,
+        ignore: ignore,
       );
       var changes = diffScannedAssets(
         baseline: baseline.resourceAssets,
         next: scanned.resources,
+        ignore: ignore,
       );
       if (changes.isNotEmpty && _shouldUploadChangedAssets) {
         logger.info('Uploading changed Flutter assets to control plane…');

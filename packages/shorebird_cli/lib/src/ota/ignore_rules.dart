@@ -9,6 +9,9 @@ const String flutterPatchIgnoreFileName = '.flutterpatchignore';
 /// Legacy meta_ota ignore file (still loaded for compatibility).
 const String metaOtaIgnoreFileName = '.meta_otaignore';
 
+/// Supported platform section headers in ignore files: `[android]` / `[ios]`.
+const Set<String> ignorePlatformSections = {'android', 'ios'};
+
 /// Project-level ignore rules for OTA snapshot / resource scanning.
 ///
 /// Syntax is a gitignore subset:
@@ -18,10 +21,13 @@ const String metaOtaIgnoreFileName = '.meta_otaignore';
 /// - leading `/` anchors to the path root
 /// - a name without `/` matches that file or directory anywhere
 /// - `!pattern` negates a previous ignore (re-includes)
+/// - `[android]` / `[ios]` section headers: rules below apply only when that
+///   platform is being checked (unscoped rules always apply)
 class FlutterPatchIgnore {
   FlutterPatchIgnore._({
     required this.projectDir,
     required this.filePath,
+    required this.platform,
     required List<_IgnoreRule> rules,
   }) : _rules = rules;
 
@@ -31,6 +37,9 @@ class FlutterPatchIgnore {
   /// Absolute path of the loaded ignore file, or null if none existed.
   final String? filePath;
 
+  /// Platform filter used when loading (`android` / `ios`), or null for all.
+  final String? platform;
+
   final List<_IgnoreRule> _rules;
 
   bool get isEmpty => _rules.isEmpty;
@@ -38,13 +47,17 @@ class FlutterPatchIgnore {
   int get ruleCount => _rules.length;
 
   /// Load `.flutterpatchignore` or legacy `.meta_otaignore`, walking up parents.
-  factory FlutterPatchIgnore.load(String projectDir) {
+  ///
+  /// When [platform] is `android` or `ios`, only unscoped rules and that
+  /// platform's section are kept. When null, all sections are included.
+  factory FlutterPatchIgnore.load(String projectDir, {String? platform}) {
     final start = p.normalize(p.absolute(projectDir));
     final found = _findIgnoreFile(start);
     if (found == null) {
       return FlutterPatchIgnore._(
         projectDir: start,
         filePath: null,
+        platform: platform,
         rules: const [],
       );
     }
@@ -52,6 +65,7 @@ class FlutterPatchIgnore {
       File(found).readAsStringSync(),
       projectDir: start,
       filePath: found,
+      platform: platform,
     );
   }
 
@@ -76,12 +90,29 @@ class FlutterPatchIgnore {
     String contents, {
     String projectDir = '',
     String? filePath,
+    String? platform,
   }) {
+    final normalizedPlatform = _normalizePlatform(platform);
     final rules = <_IgnoreRule>[];
+    String? currentSection;
+
     for (final rawLine in contents.split(RegExp(r'\r?\n'))) {
       var line = rawLine.trimRight();
       if (line.isEmpty) continue;
       if (line.trimLeft().startsWith('#')) continue;
+
+      final section = _parseSectionHeader(line.trim());
+      if (section != null) {
+        currentSection = section;
+        continue;
+      }
+
+      // Skip rules from a platform section that does not match [platform].
+      if (currentSection != null &&
+          normalizedPlatform != null &&
+          currentSection != normalizedPlatform) {
+        continue;
+      }
 
       var negate = false;
       if (line.startsWith('!')) {
@@ -101,16 +132,42 @@ class FlutterPatchIgnore {
     return FlutterPatchIgnore._(
       projectDir: projectDir,
       filePath: filePath,
+      platform: normalizedPlatform,
       rules: rules,
     );
   }
 
-  factory FlutterPatchIgnore.empty({String projectDir = ''}) =>
+  factory FlutterPatchIgnore.empty({
+    String projectDir = '',
+    String? platform,
+  }) =>
       FlutterPatchIgnore._(
         projectDir: projectDir,
         filePath: null,
+        platform: _normalizePlatform(platform),
         rules: const [],
       );
+
+  static String? _normalizePlatform(String? platform) {
+    if (platform == null || platform.isEmpty) return null;
+    final p = platform.trim().toLowerCase();
+    if (!ignorePlatformSections.contains(p)) {
+      throw ArgumentError.value(
+        platform,
+        'platform',
+        'must be one of: ${ignorePlatformSections.join(", ")}',
+      );
+    }
+    return p;
+  }
+
+  /// `[android]` / `[ios]` (case-insensitive). Returns null if not a header.
+  static String? _parseSectionHeader(String line) {
+    if (!line.startsWith('[') || !line.endsWith(']')) return null;
+    final name = line.substring(1, line.length - 1).trim().toLowerCase();
+    if (ignorePlatformSections.contains(name)) return name;
+    return null;
+  }
 
   /// Whether [path] (posix, as stored in snapshot/resources) should be skipped.
   bool isIgnored(String path) {
@@ -125,6 +182,32 @@ class FlutterPatchIgnore {
       }
     }
     return ignored;
+  }
+
+  /// Whether a snapshot path should be skipped under local ignore rules.
+  ///
+  /// Checks the full stored path (e.g. `package:foo/lib/x.dart`) and, for
+  /// dependency entries, the package-relative path (`lib/x.dart`) as well.
+  bool isIgnoredSnapshotPath(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    if (isIgnored(normalized)) return true;
+    if (normalized.startsWith('package:')) {
+      final slash = normalized.indexOf('/', 'package:'.length);
+      if (slash != -1 && isIgnored(normalized.substring(slash + 1))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Whether a scanned asset (`package` + relative [path]) should be skipped.
+  bool isIgnoredAsset({required String package, required String path}) {
+    final rel = path.replaceAll('\\', '/');
+    if (isIgnored(rel)) return true;
+    if (package.isNotEmpty && isIgnored('package:$package/$rel')) {
+      return true;
+    }
+    return false;
   }
 }
 

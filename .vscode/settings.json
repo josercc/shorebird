@@ -22,5 +22,5 @@
     "struct",
     "tempdir"
   ],
-  "dart.flutterSdkPath": ".fvm/versions/3.47.2"
+  "dart.flutterSdkPath": ".fvm/versions/3.47.4"
 }

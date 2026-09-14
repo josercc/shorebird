@@ -79,7 +79,11 @@ class CheckOtaCommand extends ShorebirdCommand {
       ..addOption(
         'platform',
         allowed: ['android', 'ios'],
-        help: 'Platform filter when fetching server baseline.',
+        help:
+            'Scope check to one platform: only scan/compare that platform\'s '
+            'native trees, load matching [android]/[ios] ignore sections, '
+            'and filter the server baseline. '
+            'Without this flag both platforms are checked.',
       )
       ..addOption(
         'app-id',
@@ -106,17 +110,24 @@ class CheckOtaCommand extends ShorebirdCommand {
         yaml: yaml,
       );
       final flutterPath = dirs.flutter;
+      final platform = results['platform'] as String?;
+
+      // When scoped to one platform, do not scan the opposite project tree.
+      final androidDir = platform == 'ios' ? null : dirs.android;
+      final iosDir = platform == 'android' ? null : dirs.ios;
 
       if (results['list-paths'] == true) {
-        final ignore = FlutterPatchIgnore.load(flutterPath);
+        final ignore =
+            FlutterPatchIgnore.load(flutterPath, platform: platform);
         final result = await checkOta(
           flutterDir: flutterPath,
-          androidDir: dirs.android,
-          iosDir: dirs.ios,
+          androidDir: androidDir,
+          iosDir: iosDir,
           writeSnapshot: false,
           skipLocalBaseline: true,
           includeDev: results['include-dev'] == true,
           ignore: ignore,
+          platform: platform,
         );
         printIgnoreNotice(ignore);
         printPaths(
@@ -135,6 +146,7 @@ class CheckOtaCommand extends ShorebirdCommand {
       int? snapNumber;
       int? resNumber;
       String? releaseVersion;
+      final ignore = FlutterPatchIgnore.load(flutterPath, platform: platform);
 
       if (version != null) {
         try {
@@ -162,7 +174,7 @@ class CheckOtaCommand extends ShorebirdCommand {
           client: codePushClientWrapper.codePushClient,
           appId: appId,
           releaseVersion: version,
-          platform: results['platform'] as String?,
+          platform: platform,
         );
         serverSnapshot = baseline.snapshot;
         snapNumber = baseline.snapshotNumber;
@@ -175,10 +187,12 @@ class CheckOtaCommand extends ShorebirdCommand {
             outPath: null,
             includeDev: results['include-dev'] == true,
             releaseVersion: version,
+            ignore: ignore,
           );
           assetChanges = diffScannedAssets(
             baseline: baseline.resourceAssets,
             next: localAssets.resources,
+            ignore: ignore,
           );
         }
 
@@ -191,8 +205,8 @@ class CheckOtaCommand extends ShorebirdCommand {
 
       final result = await checkOta(
         flutterDir: flutterPath,
-        androidDir: dirs.android,
-        iosDir: dirs.ios,
+        androidDir: androidDir,
+        iosDir: iosDir,
         outPath: results['out'] as String?,
         baselinePath: results['baseline'] as String?,
         baselineSnapshot: serverSnapshot,
@@ -204,6 +218,8 @@ class CheckOtaCommand extends ShorebirdCommand {
         writeSnapshot: results['write'] != false,
         skipLocalBaseline: serverSnapshot != null,
         includeDev: results['include-dev'] == true,
+        ignore: ignore,
+        platform: platform,
       );
 
       if (isJsonMode) {

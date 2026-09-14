@@ -38,6 +38,14 @@ class OtaFileEntry {
   /// One of: flutter_dart, flutter_assets, flutter_native, android, ios.
   final String category;
 
+  /// Whether this entry matters for an Android / iOS scoped check.
+  bool isRelevantForPlatform(String? platform) =>
+      isOtaPathRelevantForPlatform(
+        category: category,
+        path: path,
+        platform: platform,
+      );
+
   Map<String, dynamic> toJson() => {
         'path': path,
         'hash': hash,
@@ -228,11 +236,64 @@ class CheckOtaResult {
       };
 }
 
+/// Whether a snapshot path/category is relevant for a platform-scoped check.
+///
+/// When [platform] is null, everything is relevant. When `android` / `ios`,
+/// the opposite platform tree (and unrelated desktop plugin natives) are
+/// excluded so an Android check does not surface Swift/iOS noise.
+bool isOtaPathRelevantForPlatform({
+  required String category,
+  required String path,
+  String? platform,
+}) {
+  final normalized = platform?.trim().toLowerCase();
+  if (normalized == null || normalized.isEmpty) return true;
+
+  switch (category) {
+    case 'flutter_dart':
+    case 'flutter_assets':
+      return true;
+    case 'android':
+      return normalized == 'android';
+    case 'ios':
+      return normalized == 'ios';
+    case 'flutter_native':
+      return _nativePathMatchesPlatform(path, normalized);
+    default:
+      return true;
+  }
+}
+
+bool _nativePathMatchesPlatform(String path, String platform) {
+  final n = path.replaceAll('\\', '/').toLowerCase();
+  var rel = n;
+  if (rel.startsWith('package:')) {
+    final slash = rel.indexOf('/', 'package:'.length);
+    if (slash != -1) rel = rel.substring(slash + 1);
+  }
+
+  const androidMarkers = {'android'};
+  const iosMarkers = {'ios', 'darwin'};
+  const otherMarkers = {'macos', 'linux', 'windows', 'web'};
+
+  for (final seg in rel.split('/')) {
+    if (androidMarkers.contains(seg)) return platform == 'android';
+    if (iosMarkers.contains(seg)) return platform == 'ios';
+    if (otherMarkers.contains(seg)) return false;
+  }
+  // No platform folder marker — treat as shared / relevant to both.
+  return true;
+}
+
 /// Scan Flutter / Android / iOS trees into a snapshot; compare with previous if present.
 ///
 /// Flutter scan covers the app package **and** its pub dependencies (Dart, assets,
 /// and native sources under each package). Root-package paths stay relative to the
 /// Flutter dir; dependency paths use `package:<name>/<rel>`.
+///
+/// When [platform] is `android` or `ios`, only that platform's native/project
+/// trees are scanned and compared (opposite-platform baseline entries are
+/// ignored so they do not appear as removals).
 ///
 /// Baseline priority:
 /// 1. [baselineSnapshot] (e.g. downloaded from control plane)
@@ -254,11 +315,36 @@ Future<CheckOtaResult> checkOta({
   bool skipLocalBaseline = false,
   bool includeDev = false,
   FlutterPatchIgnore? ignore,
+  String? platform,
 }) async {
   final flutter = p.normalize(p.absolute(flutterDir));
-  final android =
-      androidDir == null || androidDir.isEmpty ? null : p.normalize(p.absolute(androidDir));
-  final ios = iosDir == null || iosDir.isEmpty ? null : p.normalize(p.absolute(iosDir));
+  final normalizedPlatform = platform?.trim().toLowerCase();
+  if (normalizedPlatform != null &&
+      normalizedPlatform.isNotEmpty &&
+      normalizedPlatform != 'android' &&
+      normalizedPlatform != 'ios') {
+    throw ArgumentError.value(
+      platform,
+      'platform',
+      'must be android or ios',
+    );
+  }
+  final scopedPlatform =
+      (normalizedPlatform == null || normalizedPlatform.isEmpty)
+          ? null
+          : normalizedPlatform;
+
+  // Platform-scoped checks only scan the matching project tree.
+  var android = androidDir == null || androidDir.isEmpty
+      ? null
+      : p.normalize(p.absolute(androidDir));
+  var ios =
+      iosDir == null || iosDir.isEmpty ? null : p.normalize(p.absolute(iosDir));
+  if (scopedPlatform == 'android') {
+    ios = null;
+  } else if (scopedPlatform == 'ios') {
+    android = null;
+  }
 
   _requireDir(flutter, label: 'flutter');
   if (android != null) _requireDir(android, label: 'android');
@@ -269,7 +355,8 @@ Future<CheckOtaResult> checkOta({
     throw StateError('不是 Flutter 工程：缺少 pubspec.yaml ($flutter)');
   }
 
-  final ignoreRules = ignore ?? FlutterPatchIgnore.load(flutter);
+  final ignoreRules =
+      ignore ?? FlutterPatchIgnore.load(flutter, platform: scopedPlatform);
 
   final packages = listScannablePackages(
     appDir: flutter,
@@ -279,7 +366,11 @@ Future<CheckOtaResult> checkOta({
   final files = <OtaFileEntry>[
     ..._scanPackagesDart(packages, ignore: ignoreRules),
     ..._scanPackagesAssets(packages, ignore: ignoreRules),
-    ..._scanPackagesNative(packages, ignore: ignoreRules),
+    ..._scanPackagesNative(
+      packages,
+      ignore: ignoreRules,
+      platform: scopedPlatform,
+    ),
     if (android != null) ..._scanAndroid(android, ignore: ignoreRules),
     if (ios != null) ..._scanIos(ios, ignore: ignoreRules),
   ];
@@ -323,8 +414,27 @@ Future<CheckOtaResult> checkOta({
     }
   }
 
-  final changes =
-      baseline == null ? const <FileChange>[] : compareOtaSnapshots(baseline, snapshot);
+  // Local ignore is authoritative: ignored paths are excluded from both sides
+  // of the diff (so a baseline entry that is now ignored is not a "remove").
+  // Platform filter likewise drops opposite-platform baseline entries.
+  final changes = baseline == null
+      ? const <FileChange>[]
+      : compareOtaSnapshots(
+          baseline,
+          snapshot,
+          ignore: ignoreRules,
+          platform: scopedPlatform,
+        );
+
+  final filteredAssetChanges = ignoreRules.isEmpty
+      ? assetChanges
+      : assetChanges
+          .where((c) {
+            final pkg = '${c['package'] ?? ''}';
+            final path = '${c['path'] ?? ''}';
+            return !ignoreRules.isIgnoredAsset(package: pkg, path: path);
+          })
+          .toList();
 
   if (writeSnapshot) {
     final outFile = File(output);
@@ -343,16 +453,33 @@ Future<CheckOtaResult> checkOta({
     serverSnapshotNumber: serverSnapshotNumber,
     serverResourceNumber: serverResourceNumber,
     changes: changes,
-    assetChanges: assetChanges,
+    assetChanges: filteredAssetChanges,
   );
 }
 
-List<FileChange> compareOtaSnapshots(OtaSnapshot baseline, OtaSnapshot current) {
+/// Compare [baseline] to [current].
+///
+/// When [ignore] is provided, paths matching local ignore rules are excluded
+/// from both snapshots before diffing. When [platform] is set, opposite-
+/// platform entries are excluded from both sides as well.
+List<FileChange> compareOtaSnapshots(
+  OtaSnapshot baseline,
+  OtaSnapshot current, {
+  FlutterPatchIgnore? ignore,
+  String? platform,
+}) {
+  bool skipped(OtaFileEntry f) {
+    if (!f.isRelevantForPlatform(platform)) return true;
+    return ignore != null && ignore.isIgnoredSnapshotPath(f.path);
+  }
+
   final oldMap = {
-    for (final f in baseline.files) '${f.category}:${f.path}': f,
+    for (final f in baseline.files)
+      if (!skipped(f)) '${f.category}:${f.path}': f,
   };
   final newMap = {
-    for (final f in current.files) '${f.category}:${f.path}': f,
+    for (final f in current.files)
+      if (!skipped(f)) '${f.category}:${f.path}': f,
   };
 
   final changes = <FileChange>[];
@@ -389,49 +516,18 @@ List<FileChange> compareOtaSnapshots(OtaSnapshot baseline, OtaSnapshot current) 
 }
 
 void printCheckOtaReport(CheckOtaResult result) {
-  final snap = result.snapshot;
-  stdout.writeln('==> 扫描完成');
-  stdout.writeln('    Flutter : ${snap.flutterDir}');
-  if (snap.androidDir != null) stdout.writeln('    Android : ${snap.androidDir}');
-  if (snap.iosDir != null) stdout.writeln('    iOS     : ${snap.iosDir}');
-  stdout.writeln('    文件数  : ${snap.files.length} → ${result.outPath}');
-  if (result.releaseVersion != null) {
-    stdout.writeln('    版本    : ${result.releaseVersion}');
-  }
-
-  if (!result.hasBaseline) {
-    stdout.writeln('');
-    stdout.writeln(
-      '已写入本地快照。请用 upload-snapshot / upload-resources 上传到对应版本，'
-      '或下次带 --version 从服务器拉基线对比。',
-    );
-    stdout.writeln('OTA 支持: 否（无基线，无法判断可热更变动）');
+  if (result.otaSupported) {
+    stdout.writeln('OTA 支持: 是');
     return;
   }
 
-  stdout.writeln('');
-  if (result.baselineSource == 'server') {
-    final sn = result.serverSnapshotNumber;
+  // Cannot hot-update due to native/platform changes — list only those files.
+  if (result.blockingChanges.isNotEmpty) {
     stdout.writeln(
-      '对比基线: 服务器快照'
-      '${sn != null ? ' #$sn' : ''}'
-      '${result.releaseVersion != null ? ' (${result.releaseVersion})' : ''}',
+      'OTA 支持: 否（检测到 Android / iOS / Flutter 原生相关变动，无法热更，需重新打 release）',
     );
-  } else {
-    stdout.writeln('对比基线: ${result.baselinePath}');
-  }
-
-  if (!result.hasChanges) {
-    stdout.writeln('无文件变动。');
-    stdout.writeln('OTA 支持: 否（无变动，无需发补丁）');
-    return;
-  }
-
-  void dump(String title, List<FileChange> list) {
-    if (list.isEmpty) return;
-    stdout.writeln('');
-    stdout.writeln('$title (${list.length}):');
-    for (final c in list) {
+    stdout.writeln('不可热更变动 (${result.blockingChanges.length}):');
+    for (final c in result.blockingChanges) {
       final tag = switch (c.kind) {
         FileChangeKind.added => '+',
         FileChangeKind.removed => '-',
@@ -439,37 +535,18 @@ void printCheckOtaReport(CheckOtaResult result) {
       };
       stdout.writeln('  $tag [${c.category}] ${c.path}');
     }
+    return;
   }
 
-  dump('可 OTA（Dart / 资源文件）', result.patchableChanges);
-  dump('不可 OTA（原生 / 平台）', result.blockingChanges);
-
-  final other = result.changes
-      .where((c) => !c.isPatchable && !c.isBlocking)
-      .toList();
-  dump('其他变动', other);
-
-  if (result.assetChanges.isNotEmpty) {
-    stdout.writeln('');
-    stdout.writeln('资源配置变动 (${result.assetChanges.length}):');
-    for (final c in result.assetChanges.take(50)) {
-      stdout.writeln(
-        '  ${c['change']} ${c['package']}/${c['path']}',
-      );
-    }
-    if (result.assetChanges.length > 50) {
-      stdout.writeln('  … 另有 ${result.assetChanges.length - 50} 条');
-    }
+  if (!result.hasBaseline) {
+    stdout.writeln('OTA 支持: 否（无基线，无法判断可热更变动）');
+    return;
   }
-
-  stdout.writeln('');
-  if (result.otaSupported) {
-    stdout.writeln('OTA 支持: 是（仅 Flutter Dart / 资源变动，含依赖包）');
-  } else if (result.blockingChanges.isNotEmpty) {
-    stdout.writeln('OTA 支持: 否（检测到 Android / iOS / Flutter 原生相关变动，需重新打 release）');
-  } else {
-    stdout.writeln('OTA 支持: 否（无可热更变动）');
+  if (!result.hasChanges) {
+    stdout.writeln('OTA 支持: 否（无变动，无需发补丁）');
+    return;
   }
+  stdout.writeln('OTA 支持: 否（无可热更变动）');
 }
 
 void _requireDir(String path, {required String label}) {
@@ -501,7 +578,7 @@ List<OtaFileEntry> _scanPackagesDart(
           p.relative(entity.path, from: pkg.rootUri).replaceAll('\\', '/');
       if (_shouldSkipPath(rel)) continue;
       final snapPath = _snapshotPath(pkg, rel);
-      if (ignore.isIgnored(snapPath) || ignore.isIgnored(rel)) continue;
+      if (ignore.isIgnoredSnapshotPath(snapPath)) continue;
       out.add(_hashFile(
         root: pkg.rootUri,
         file: entity,
@@ -528,7 +605,7 @@ List<OtaFileEntry> _scanPackagesAssets(
     for (final entry in assetEntries) {
       for (final rel in expandAssetEntry(pkg.rootUri, entry)) {
         final key = _snapshotPath(pkg, rel);
-        if (ignore.isIgnored(key) || ignore.isIgnored(rel)) continue;
+        if (ignore.isIgnoredSnapshotPath(key)) continue;
         if (!seen.add(key)) continue;
         final file = File(p.join(pkg.rootUri, rel));
         if (!file.existsSync()) continue;
@@ -562,9 +639,13 @@ const _nativeExt = {
 /// Native sources in the app package (excludes top-level android/ios — those
 /// are scanned via --android/--ios) and in dependency packages (includes their
 /// android/ios plugin sources).
+///
+/// When [platform] is `android` / `ios`, dependency plugin trees for the
+/// opposite platform (and desktop) are skipped.
 List<OtaFileEntry> _scanPackagesNative(
   List<ScannablePackage> packages, {
   required FlutterPatchIgnore ignore,
+  String? platform,
 }) {
   const skipTopRoot = {
     'android',
@@ -596,6 +677,13 @@ List<OtaFileEntry> _scanPackagesNative(
     '.cxx',
   };
 
+  // Platform folders to skip entirely under dependency packages.
+  final skipPlatformFolders = <String>{
+    if (platform == 'android')
+      ...{'ios', 'darwin', 'macos', 'linux', 'windows', 'web'},
+    if (platform == 'ios') ...{'android', 'macos', 'linux', 'windows', 'web'},
+  };
+
   final out = <OtaFileEntry>[];
 
   for (final pkg in packages) {
@@ -611,6 +699,7 @@ List<OtaFileEntry> _scanPackagesNative(
         if (entity is Directory) {
           if (skipDirAny.contains(name)) continue;
           if (skipPlatformTops && skipTopRoot.contains(name)) continue;
+          if (!pkg.isRoot && skipPlatformFolders.contains(name)) continue;
           walk(entity, skipPlatformTops: false);
           continue;
         }
@@ -620,7 +709,14 @@ List<OtaFileEntry> _scanPackagesNative(
             p.relative(entity.path, from: pkg.rootUri).replaceAll('\\', '/');
         if (_shouldSkipPath(rel)) continue;
         final snapPath = _snapshotPath(pkg, rel);
-        if (ignore.isIgnored(snapPath) || ignore.isIgnored(rel)) continue;
+        if (ignore.isIgnoredSnapshotPath(snapPath)) continue;
+        if (!isOtaPathRelevantForPlatform(
+          category: 'flutter_native',
+          path: snapPath,
+          platform: platform,
+        )) {
+          continue;
+        }
         out.add(_hashFile(
           root: pkg.rootUri,
           file: entity,
@@ -755,7 +851,7 @@ List<OtaFileEntry> _scanTree({
       if (entity is! File) continue;
       final rel = p.relative(entity.path, from: root).replaceAll('\\', '/');
       if (_shouldSkipPath(rel)) continue;
-      if (ignore.isIgnored(rel)) continue;
+      if (ignore.isIgnoredSnapshotPath(rel)) continue;
 
       final base = p.basename(entity.path);
       final matchName = includeNames.contains(base);

@@ -130,8 +130,7 @@ Future<ScanAssetsResult> scanFlutterAssets({
         final posixRel = fileRel.replaceAll('\\', '/');
         final snapPath =
             isRoot ? posixRel : 'package:${pkg.name}/$posixRel';
-        if (ignoreRules.isIgnored(snapPath) ||
-            ignoreRules.isIgnored(posixRel)) {
+        if (ignoreRules.isIgnoredSnapshotPath(snapPath)) {
           continue;
         }
 
@@ -487,13 +486,27 @@ List<ScannedAsset> loadScannedAssetsFromFile(String path) {
 ///
 /// Each entry: `{package, path, hash, size, package_hash, change}` where
 /// `change` is `add` | `update` | `remove`.
+///
+/// When [ignore] is set, assets matching local ignore rules are excluded from
+/// both sides before diffing (local ignore is authoritative).
 List<Map<String, Object?>> diffScannedAssets({
   required List<ScannedAsset> baseline,
   required List<ScannedAsset> next,
+  FlutterPatchIgnore? ignore,
 }) {
+  bool skipped(ScannedAsset a) =>
+      ignore != null &&
+      ignore.isIgnoredAsset(package: a.package, path: a.path);
+
   String key(ScannedAsset a) => '${a.package}|${a.path}';
-  final baseMap = {for (final a in baseline) key(a): a};
-  final nextMap = {for (final a in next) key(a): a};
+  final baseMap = {
+    for (final a in baseline)
+      if (!skipped(a)) key(a): a,
+  };
+  final nextMap = {
+    for (final a in next)
+      if (!skipped(a)) key(a): a,
+  };
   final changes = <Map<String, Object?>>[];
 
   for (final entry in nextMap.entries) {

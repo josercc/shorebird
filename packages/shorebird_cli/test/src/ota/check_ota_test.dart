@@ -300,4 +300,93 @@ packages:
     expect(result.patchableChanges, isNotEmpty);
     expect(File(out).readAsStringSync(), before);
   });
+
+  test('platform=android ignores ios/swift changes', () async {
+    final flutter = await makeApp(withDep: true);
+    final android = p.join(tmp.path, 'android');
+    final ios = p.join(tmp.path, 'ios');
+    final out = p.join(tmp.path, 'snap.json');
+
+    // Add iOS plugin native under dep so unscoped scans would see it.
+    File(
+      p.join(tmp.path, 'dep_pkg', 'ios', 'Classes', 'Plugin.swift'),
+    )
+      ..createSync(recursive: true)
+      ..writeAsStringSync('class Plugin {}');
+
+    await checkOta(
+      flutterDir: flutter.path,
+      androidDir: android,
+      iosDir: ios,
+      outPath: out,
+      platform: 'android',
+    );
+
+    // Change iOS app + Swift plugin — must not block Android OTA check.
+    File(p.join(ios, 'Runner', 'AppDelegate.swift'))
+        .writeAsStringSync('import Flutter\n// ios changed');
+    File(
+      p.join(tmp.path, 'dep_pkg', 'ios', 'Classes', 'Plugin.swift'),
+    ).writeAsStringSync('class Plugin { func x() {} }');
+
+    final result = await checkOta(
+      flutterDir: flutter.path,
+      androidDir: android,
+      iosDir: ios,
+      outPath: out,
+      platform: 'android',
+      writeSnapshot: false,
+    );
+
+    expect(
+      result.blockingChanges.any(
+        (c) =>
+            c.category == 'ios' ||
+            c.path.contains('/ios/') ||
+            c.path.endsWith('.swift'),
+      ),
+      isFalse,
+      reason: 'Android-scoped check must not surface iOS/Swift changes',
+    );
+    expect(result.snapshot.files.any((f) => f.category == 'ios'), isFalse);
+    expect(
+      result.snapshot.files.any((f) => f.path.contains('/ios/')),
+      isFalse,
+    );
+  });
+
+  test('isOtaPathRelevantForPlatform classifies native paths', () {
+    expect(
+      isOtaPathRelevantForPlatform(
+        category: 'ios',
+        path: 'Runner/AppDelegate.swift',
+        platform: 'android',
+      ),
+      isFalse,
+    );
+    expect(
+      isOtaPathRelevantForPlatform(
+        category: 'flutter_native',
+        path: 'package:cam/ios/Sources/Cam.swift',
+        platform: 'android',
+      ),
+      isFalse,
+    );
+    expect(
+      isOtaPathRelevantForPlatform(
+        category: 'flutter_native',
+        path: 'package:cam/android/src/P.java',
+        platform: 'android',
+      ),
+      isTrue,
+    );
+    expect(
+      isOtaPathRelevantForPlatform(
+        category: 'flutter_dart',
+        path: 'lib/main.dart',
+        platform: 'android',
+      ),
+      isTrue,
+    );
+  });
 }
