@@ -597,6 +597,92 @@ Tools • Dart 3.0.6 • DevTools 2.23.1''');
       });
     });
 
+    group('ensureDefaultFlutterInstalled', () {
+      const revision = 'test-revision';
+      late Directory targetDirectory;
+
+      void createReadyCheckout() {
+        File(
+          p.join(targetDirectory.path, 'bin', 'flutter'),
+        ).createSync(recursive: true);
+        Directory(p.join(targetDirectory.path, '.git')).createSync();
+        File(p.join(targetDirectory.path, 'bin', 'internal', 'engine.version'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('test-engine\n');
+      }
+
+      setUp(() {
+        when(() => shorebirdEnv.flutterRevision).thenReturn(revision);
+        targetDirectory = Directory(
+          p.join(flutterDirectory.parent.path, revision),
+        );
+      });
+
+      test('does nothing when the default SDK is already ready', () async {
+        createReadyCheckout();
+
+        await runWithOverrides(
+          () => shorebirdFlutter.ensureDefaultFlutterInstalled(),
+        );
+
+        verifyNever(
+          () => git.clone(
+            url: any(named: 'url'),
+            outputDirectory: any(named: 'outputDirectory'),
+            args: any(named: 'args'),
+          ),
+        );
+        verifyNever(
+          () => logger.info(any(that: contains('Default Flutter SDK'))),
+        );
+      });
+
+      test('installs when the default SDK is missing', () async {
+        await runWithOverrides(
+          () => shorebirdFlutter.ensureDefaultFlutterInstalled(),
+        );
+
+        verify(
+          () => logger.info(any(that: contains('Default Flutter SDK'))),
+        ).called(1);
+        verify(
+          () => git.clone(
+            url: ShorebirdFlutter.flutterGitUrl,
+            outputDirectory: any(named: 'outputDirectory'),
+            args: any(named: 'args'),
+          ),
+        ).called(1);
+        expect(targetDirectory.existsSync(), isTrue);
+      });
+
+      test('reinstalls when .git is missing', () async {
+        File(
+          p.join(targetDirectory.path, 'bin', 'flutter'),
+        ).createSync(recursive: true);
+        File(p.join(targetDirectory.path, 'bin', 'internal', 'engine.version'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('test-engine\n');
+        File(
+          p.join(targetDirectory.path, ShorebirdFlutter.precacheStampName),
+        ).createSync();
+
+        await runWithOverrides(
+          () => shorebirdFlutter.ensureDefaultFlutterInstalled(),
+        );
+
+        verify(
+          () => logger.info(any(that: contains('incompletely installed'))),
+        ).called(1);
+        verify(
+          () => git.clone(
+            url: ShorebirdFlutter.flutterGitUrl,
+            outputDirectory: any(named: 'outputDirectory'),
+            args: any(named: 'args'),
+          ),
+        ).called(1);
+      });
+    });
+
     group('getRevisionForVersion', () {
       const version = '3.16.3';
       const exception = ProcessException('git', ['rev-parse']);
@@ -923,6 +1009,10 @@ origin/flutter_release/3.10.6''';
         File(
           p.join(targetDirectory.path, 'bin', 'flutter'),
         ).createSync(recursive: true);
+        Directory(p.join(targetDirectory.path, '.git')).createSync();
+        File(p.join(targetDirectory.path, 'bin', 'internal', 'engine.version'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('test-engine\n');
       }
 
       setUp(() {
@@ -1198,6 +1288,12 @@ origin/flutter_release/3.10.6''';
             File(
               p.join(targetDirectory.path, 'bin', 'flutter.bat'),
             ).createSync(recursive: true);
+            Directory(p.join(targetDirectory.path, '.git')).createSync();
+            File(
+                p.join(targetDirectory.path, 'bin', 'internal', 'engine.version'),
+              )
+              ..createSync(recursive: true)
+              ..writeAsStringSync('test-engine\n');
 
             await runWithOverrides(
               () => shorebirdFlutter.installRevision(revision: revision),

@@ -179,16 +179,54 @@ class ShorebirdFlutter {
 
   /// Whether [directory] definitely does not hold a usable install.
   ///
-  /// A finished checkout always contains the Flutter launcher, so its absence
-  /// is proof the directory is unusable. The converse does not hold, which is
-  /// why this only ever condemns a directory and never certifies one: a
-  /// checkout interrupted after the launcher was written looks identical to a
-  /// finished one from the outside. Installs published by [_cloneAndCheckout]
-  /// do not need certifying, since a partial one is never published at all.
+  /// A finished checkout always contains the Flutter launcher, a `.git`
+  /// metadata directory (version resolution reads `flutter_release/*` refs),
+  /// and `bin/internal/engine.version`. Absence of any of those is proof the
+  /// directory is unusable. The converse does not hold, which is why this only
+  /// ever condemns a directory and never certifies one: a checkout interrupted
+  /// after the launcher was written looks identical to a finished one from the
+  /// outside. Installs published by [_cloneAndCheckout] do not need
+  /// certifying, since a partial one is never published at all.
   bool _isUnusableInstall(Directory directory) {
     if (!directory.existsSync()) return false;
     final launcher = platform.isWindows ? 'flutter.bat' : 'flutter';
-    return !File(p.join(directory.path, 'bin', launcher)).existsSync();
+    if (!File(p.join(directory.path, 'bin', launcher)).existsSync()) {
+      return true;
+    }
+    if (!Directory(p.join(directory.path, '.git')).existsSync()) {
+      return true;
+    }
+    if (!File(
+      p.join(directory.path, 'bin', 'internal', 'engine.version'),
+    ).existsSync()) {
+      return true;
+    }
+    return false;
+  }
+
+  /// Whether the active Flutter pin (from `flutter.version`) can resolve
+  /// versions and satisfy commands that read `engine.version`.
+  bool get isDefaultFlutterInstalled {
+    final directory = Directory(_workingDirectory());
+    return directory.existsSync() && !_isUnusableInstall(directory);
+  }
+
+  /// Installs the active Flutter pin when it is missing or incomplete.
+  ///
+  /// Packaged CLI installs do not bootstrap Flutter on first launch, but
+  /// version resolution (`flutter install` / `flutter use`) and `doctor` both
+  /// need a working checkout of the pin in `flutter.version`. Call this before
+  /// those operations so a missing default SDK is repaired automatically.
+  Future<void> ensureDefaultFlutterInstalled() async {
+    if (isDefaultFlutterInstalled) return;
+
+    final revision = shorebirdEnv.flutterRevision;
+    final directory = Directory(_workingDirectory(revision: revision));
+    if (!directory.existsSync()) {
+      logger.info('Default Flutter SDK is not installed. Installing it…');
+    }
+
+    await installRevision(revision: revision);
   }
 
   /// Moves an unusable install out of the way so a fresh one can take its
@@ -256,8 +294,15 @@ class ShorebirdFlutter {
 
     // Read the version before condemning anything. getVersionForRevision runs
     // git in the active revision's checkout, which is this very directory
-    // whenever the revision being installed is the active one.
-    final version = await getVersionForRevision(flutterRevision: revision);
+    // whenever the revision being installed is the active one. When that
+    // checkout is missing (first packaged-CLI bootstrap), git cannot run —
+    // version is only used for progress text, so treat failure as unknown.
+    String? version;
+    try {
+      version = await getVersionForRevision(flutterRevision: revision);
+    } on Exception {
+      version = null;
+    }
 
     if (isUnusable) {
       logger.info(

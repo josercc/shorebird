@@ -207,6 +207,9 @@ void main() {
             shorebirdFlutter.installRevision(revision: any(named: 'revision')),
       ).thenAnswer((_) async => {});
       when(
+        () => shorebirdFlutter.ensureDefaultFlutterInstalled(),
+      ).thenAnswer((_) async {});
+      when(
         () => shorebirdFlutter.fetchRemoteRefs(),
       ).thenAnswer((_) async {});
       when(

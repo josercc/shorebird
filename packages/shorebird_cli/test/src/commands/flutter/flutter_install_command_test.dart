@@ -52,6 +52,9 @@ void main() {
       when(() => argResults.rest).thenReturn([version]);
       when(() => shorebirdEnv.shorebirdRoot).thenReturn(shorebirdRoot);
       when(
+        () => shorebirdFlutter.ensureDefaultFlutterInstalled(),
+      ).thenAnswer((_) async {});
+      when(
         () => shorebirdFlutter.fetchRemoteRefs(),
       ).thenAnswer((_) async {});
       when(
@@ -150,6 +153,7 @@ void main() {
 
       expect(exitCode, equals(ExitCode.success.code));
       verifyInOrder([
+        () => shorebirdFlutter.ensureDefaultFlutterInstalled(),
         () => shorebirdFlutter.fetchRemoteRefs(),
         () => shorebirdFlutter.resolveFlutterRevision(version),
         () => shorebirdFlutter.installRevision(revision: revision),

@@ -38,6 +38,9 @@ void main() {
       command = runWithOverrides(FlutterVersionsListCommand.new);
 
       when(() => logger.progress(any())).thenReturn(progress);
+      when(
+        () => shorebirdFlutter.ensureDefaultFlutterInstalled(),
+      ).thenAnswer((_) async {});
     });
 
     test('has correct name and description', () {

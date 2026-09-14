@@ -19,6 +19,18 @@ mixin FlutterRevisionArg on ShorebirdCommand {
   Future<({String? revision, int exitCode})> resolveRevision(
     String versionArg,
   ) async {
+    try {
+      await shorebirdFlutter.ensureDefaultFlutterInstalled();
+    } on Exception catch (error) {
+      final message = 'Failed to install the default Flutter SDK.\n$error';
+      if (isJsonMode) {
+        emitJsonError(code: JsonErrorCode.softwareError, message: message);
+      } else {
+        logger.err(message);
+      }
+      return (revision: null, exitCode: ExitCode.software.code);
+    }
+
     await shorebirdFlutter.fetchRemoteRefs();
 
     final String? revision;

@@ -106,6 +106,9 @@ void main() {
         () => doctor.runValidators(any(), applyFixes: any(named: 'applyFixes')),
       ).thenAnswer((_) async => {});
       when(shorebirdFlutter.getVersionString).thenAnswer((_) async => null);
+      when(
+        () => shorebirdFlutter.ensureDefaultFlutterInstalled(),
+      ).thenAnswer((_) async {});
 
       command = runWithOverrides(DoctorCommand.new)
         ..testArgResults = argResults;

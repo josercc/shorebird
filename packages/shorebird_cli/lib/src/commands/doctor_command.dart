@@ -6,6 +6,7 @@ import 'package:shorebird_cli/src/android_studio.dart';
 import 'package:shorebird_cli/src/doctor.dart';
 import 'package:shorebird_cli/src/executables/executables.dart';
 import 'package:shorebird_cli/src/http_client/http_client.dart';
+import 'package:shorebird_cli/src/json_output.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/network_checker.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
@@ -46,6 +47,13 @@ class DoctorCommand extends ShorebirdCommand {
   @override
   Future<int> run() async {
     if (isJsonMode) return _runJson();
+
+    try {
+      await shorebirdFlutter.ensureDefaultFlutterInstalled();
+    } on Exception catch (error) {
+      logger.err('Failed to install the default Flutter SDK.\n$error');
+      return ExitCode.software.code;
+    }
 
     final verbose = results['verbose'] == true;
     final shouldFix = results['fix'] == true;
@@ -143,6 +151,16 @@ Android Toolchain
   }
 
   Future<int> _runJson() async {
+    try {
+      await shorebirdFlutter.ensureDefaultFlutterInstalled();
+    } on Exception catch (error) {
+      emitJsonError(
+        code: JsonErrorCode.softwareError,
+        message: 'Failed to install the default Flutter SDK: $error',
+      );
+      return ExitCode.software.code;
+    }
+
     final flutterVersion = await _tryGetFlutterVersion();
 
     String? javaVersion;

@@ -22,6 +22,18 @@ class FlutterVersionsListCommand extends ShorebirdCommand {
 
   @override
   Future<int> run() async {
+    try {
+      await shorebirdFlutter.ensureDefaultFlutterInstalled();
+    } on Exception catch (error) {
+      final message = 'Failed to install the default Flutter SDK: $error';
+      if (isJsonMode) {
+        emitJsonError(code: JsonErrorCode.softwareError, message: message);
+      } else {
+        logger.err(message);
+      }
+      return ExitCode.software.code;
+    }
+
     final progress = isJsonMode
         ? null
         : logger.progress('Fetching Flutter versions');
