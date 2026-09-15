@@ -64,6 +64,12 @@ class CheckOtaCommand extends ShorebirdCommand {
             'to this path. Written even when the list is empty.',
       )
       ..addOption(
+        'supported-out',
+        help:
+            'Write supported (Dart / Flutter-asset) file changes as JSON '
+            'to this path. Written even when the list is empty.',
+      )
+      ..addOption(
         'baseline',
         help:
             'Local baseline snapshot path '
@@ -260,6 +266,18 @@ class CheckOtaCommand extends ShorebirdCommand {
           logger.info(
             'Wrote unsupported files JSON → $unsupportedOut '
             '(${result.blockingChanges.length})',
+          );
+        }
+      }
+
+      final supportedOut = (results['supported-out'] as String?)?.trim();
+      if (supportedOut != null && supportedOut.isNotEmpty) {
+        writeSupportedFilesJson(result, supportedOut);
+        if (!isJsonMode) {
+          logger.info(
+            'Wrote supported files JSON → $supportedOut '
+            '(${result.patchableChanges.length} files, '
+            '${result.assetChanges.length} assets)',
           );
         }
       }

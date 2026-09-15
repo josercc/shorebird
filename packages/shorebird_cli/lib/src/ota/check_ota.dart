@@ -242,6 +242,15 @@ class CheckOtaResult {
         'unsupported_files':
             blockingChanges.map((c) => c.toJson()).toList(),
       };
+
+  /// JSON payload of Dart / Flutter-asset (OTA-patchable) file changes only.
+  Map<String, dynamic> supportedFilesToJson() => {
+        'ota_supported': otaSupported,
+        'patchable_change_count': patchableChanges.length,
+        'asset_change_count': assetChanges.length,
+        'supported_files': patchableChanges.map((c) => c.toJson()).toList(),
+        'asset_changes': assetChanges,
+      };
 }
 
 /// Write [CheckOtaResult.unsupportedFilesToJson] to [path].
@@ -250,6 +259,15 @@ void writeUnsupportedFilesJson(CheckOtaResult result, String path) {
   file.parent.createSync(recursive: true);
   file.writeAsStringSync(
     '${const JsonEncoder.withIndent('  ').convert(result.unsupportedFilesToJson())}\n',
+  );
+}
+
+/// Write [CheckOtaResult.supportedFilesToJson] to [path].
+void writeSupportedFilesJson(CheckOtaResult result, String path) {
+  final file = File(p.normalize(p.absolute(path)));
+  file.parent.createSync(recursive: true);
+  file.writeAsStringSync(
+    '${const JsonEncoder.withIndent('  ').convert(result.supportedFilesToJson())}\n',
   );
 }
 

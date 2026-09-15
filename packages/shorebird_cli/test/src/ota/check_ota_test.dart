@@ -461,4 +461,88 @@ packages:
     expect(payload['blocking_change_count'], 0);
     expect(payload['unsupported_files'], isEmpty);
   });
+
+  test('supportedFilesToJson lists patchable changes only', () async {
+    final flutter = await makeApp();
+    final android = p.join(tmp.path, 'android');
+    final ios = p.join(tmp.path, 'ios');
+    final out = p.join(tmp.path, 'snap.json');
+    final supportedOut = p.join(tmp.path, 'supported.json');
+
+    await checkOta(
+      flutterDir: flutter.path,
+      androidDir: android,
+      iosDir: ios,
+      outPath: out,
+    );
+
+    File(p.join(android, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'))
+        .writeAsStringSync('class MainActivityChanged');
+    File(p.join(flutter.path, 'lib', 'main.dart'))
+        .writeAsStringSync("void main() { print('also dart'); }");
+
+    final result = await checkOta(
+      flutterDir: flutter.path,
+      androidDir: android,
+      iosDir: ios,
+      outPath: out,
+    );
+
+    expect(result.otaSupported, isFalse);
+    expect(result.blockingChanges, isNotEmpty);
+    expect(result.patchableChanges, isNotEmpty);
+
+    final payload = result.supportedFilesToJson();
+    expect(payload['ota_supported'], isFalse);
+    expect(payload['patchable_change_count'], result.patchableChanges.length);
+    expect(payload['asset_change_count'], result.assetChanges.length);
+    final files = payload['supported_files'] as List;
+    expect(files, hasLength(result.patchableChanges.length));
+    expect(
+      files.every((f) => (f as Map)['ota_patchable'] == true),
+      isTrue,
+    );
+    expect(
+      files.any((f) => (f as Map)['category'] == 'flutter_dart'),
+      isTrue,
+    );
+    expect(
+      files.any((f) => (f as Map)['category'] == 'android'),
+      isFalse,
+    );
+
+    writeSupportedFilesJson(result, supportedOut);
+    expect(File(supportedOut).existsSync(), isTrue);
+    final written =
+        jsonDecode(File(supportedOut).readAsStringSync()) as Map;
+    expect(written['patchable_change_count'], result.patchableChanges.length);
+  });
+
+  test('supportedFilesToJson is empty when only blockers', () async {
+    final flutter = await makeApp();
+    final android = p.join(tmp.path, 'android');
+    final out = p.join(tmp.path, 'snap.json');
+
+    await checkOta(
+      flutterDir: flutter.path,
+      androidDir: android,
+      outPath: out,
+    );
+    File(p.join(android, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'))
+        .writeAsStringSync('class MainActivityChanged');
+
+    final result = await checkOta(
+      flutterDir: flutter.path,
+      androidDir: android,
+      outPath: out,
+    );
+    expect(result.otaSupported, isFalse);
+    expect(result.patchableChanges, isEmpty);
+
+    final payload = result.supportedFilesToJson();
+    expect(payload['ota_supported'], isFalse);
+    expect(payload['patchable_change_count'], 0);
+    expect(payload['supported_files'], isEmpty);
+    expect(payload['asset_changes'], isEmpty);
+  });
 }
