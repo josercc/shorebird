@@ -389,4 +389,76 @@ packages:
       isTrue,
     );
   });
+
+  test('unsupportedFilesToJson lists blocking changes only', () async {
+    final flutter = await makeApp();
+    final android = p.join(tmp.path, 'android');
+    final ios = p.join(tmp.path, 'ios');
+    final out = p.join(tmp.path, 'snap.json');
+    final unsupportedOut = p.join(tmp.path, 'unsupported.json');
+
+    await checkOta(
+      flutterDir: flutter.path,
+      androidDir: android,
+      iosDir: ios,
+      outPath: out,
+    );
+
+    File(p.join(android, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'))
+        .writeAsStringSync('class MainActivityChanged');
+    File(p.join(flutter.path, 'lib', 'main.dart'))
+        .writeAsStringSync("void main() { print('also dart'); }");
+
+    final result = await checkOta(
+      flutterDir: flutter.path,
+      androidDir: android,
+      iosDir: ios,
+      outPath: out,
+    );
+
+    expect(result.otaSupported, isFalse);
+    expect(result.blockingChanges, isNotEmpty);
+    expect(result.patchableChanges, isNotEmpty);
+
+    final payload = result.unsupportedFilesToJson();
+    expect(payload['ota_supported'], isFalse);
+    expect(payload['blocking_change_count'], result.blockingChanges.length);
+    final files = payload['unsupported_files'] as List;
+    expect(files, hasLength(result.blockingChanges.length));
+    expect(
+      files.every((f) => (f as Map)['ota_patchable'] == false),
+      isTrue,
+    );
+    expect(
+      files.any((f) => (f as Map)['category'] == 'android'),
+      isTrue,
+    );
+    expect(
+      files.any((f) => (f as Map)['category'] == 'flutter_dart'),
+      isFalse,
+    );
+
+    writeUnsupportedFilesJson(result, unsupportedOut);
+    expect(File(unsupportedOut).existsSync(), isTrue);
+    final written =
+        jsonDecode(File(unsupportedOut).readAsStringSync()) as Map;
+    expect(written['blocking_change_count'], result.blockingChanges.length);
+  });
+
+  test('unsupportedFilesToJson is empty when no blockers', () async {
+    final flutter = await makeApp();
+    final out = p.join(tmp.path, 'snap.json');
+
+    await checkOta(flutterDir: flutter.path, outPath: out);
+    File(p.join(flutter.path, 'lib', 'main.dart'))
+        .writeAsStringSync("void main() { /* v2 */ }");
+
+    final result = await checkOta(flutterDir: flutter.path, outPath: out);
+    expect(result.otaSupported, isTrue);
+
+    final payload = result.unsupportedFilesToJson();
+    expect(payload['ota_supported'], isTrue);
+    expect(payload['blocking_change_count'], 0);
+    expect(payload['unsupported_files'], isEmpty);
+  });
 }

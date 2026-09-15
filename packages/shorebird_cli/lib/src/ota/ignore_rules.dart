@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-/// Preferred ignore file name under the Flutter project root (or a parent dir).
+/// Ignore file name under the Flutter project root (or a parent dir).
 const String flutterPatchIgnoreFileName = '.flutterpatchignore';
 
 /// Legacy meta_ota ignore file (still loaded for compatibility).
@@ -12,7 +12,7 @@ const String metaOtaIgnoreFileName = '.meta_otaignore';
 /// Supported platform section headers in ignore files: `[android]` / `[ios]`.
 const Set<String> ignorePlatformSections = {'android', 'ios'};
 
-/// Project-level ignore rules for OTA snapshot / resource scanning.
+/// Project-level ignore rules for OTA snapshot / resource scanning and diff.
 ///
 /// Syntax is a gitignore subset:
 /// - blank lines and `#` comments are ignored
@@ -210,9 +210,6 @@ class FlutterPatchIgnore {
     return false;
   }
 }
-
-/// @nodoc — alias for callers migrating from meta_ota.
-typedef MetaOtaIgnore = FlutterPatchIgnore;
 
 class _IgnoreRule {
   _IgnoreRule({required this.pattern, required this.negate})

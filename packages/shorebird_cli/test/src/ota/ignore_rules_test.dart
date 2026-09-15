@@ -107,12 +107,15 @@ frameworks
       expect(ignore.isIgnored('app/src/main/AndroidManifest.xml'), isFalse);
     });
 
-    test('load walks up to parent .meta_otaignore', () {
-      final root = Directory.systemTemp.createTempSync('meta_ota_ignore_walk_');
+    test('load walks up to parent .flutterpatchignore', () {
+      final root = Directory.systemTemp.createTempSync(
+        'flutterpatch_ignore_walk_',
+      );
       addTearDown(() => root.deleteSync(recursive: true));
       final flutter = Directory(p.join(root.path, 'metaapp_flutter'))
         ..createSync();
-      File(p.join(root.path, '.meta_otaignore')).writeAsStringSync('unityLibrary\n');
+      File(p.join(root.path, '.flutterpatchignore'))
+          .writeAsStringSync('unityLibrary\n');
 
       final ignore = FlutterPatchIgnore.load(flutter.path);
       expect(ignore.filePath, isNotNull);
@@ -120,7 +123,7 @@ frameworks
     });
 
     test('load missing file is empty', () {
-      final dir = Directory.systemTemp.createTempSync('meta_ota_ignore_');
+      final dir = Directory.systemTemp.createTempSync('flutterpatch_ignore_');
       addTearDown(() => dir.deleteSync(recursive: true));
       final ignore = FlutterPatchIgnore.load(dir.path);
       expect(ignore.isEmpty, isTrue);
@@ -128,11 +131,11 @@ frameworks
     });
   });
 
-  group('scan respects .meta_otaignore', () {
+  group('scan respects .flutterpatchignore', () {
     late Directory tmp;
 
     setUp(() {
-      tmp = Directory.systemTemp.createTempSync('meta_ota_ignore_scan_');
+      tmp = Directory.systemTemp.createTempSync('flutterpatch_ignore_scan_');
     });
 
     tearDown(() {
@@ -219,7 +222,7 @@ packages:
 
     test('checkOta skips ignored dart and assets', () async {
       final flutter = await makeApp();
-      File(p.join(flutter.path, '.meta_otaignore')).writeAsStringSync('''
+      File(p.join(flutter.path, '.flutterpatchignore')).writeAsStringSync('''
 lib/generated/**
 assets/skip.txt
 ''');
@@ -236,9 +239,74 @@ assets/skip.txt
       expect(paths, isNot(contains('assets/skip.txt')));
     });
 
+    test('compare skips paths ignored by current rules', () {
+      final baseline = OtaSnapshot(
+        flutterDir: '/app',
+        files: [
+          OtaFileEntry(
+            path: 'UnityLibrary/Classes/A.h',
+            hash: 'old',
+            size: 1,
+            category: 'ios',
+          ),
+          OtaFileEntry(
+            path: 'Runner/AppDelegate.swift',
+            hash: 'a1',
+            size: 1,
+            category: 'ios',
+          ),
+          OtaFileEntry(
+            path: 'lib/main.dart',
+            hash: 'd1',
+            size: 1,
+            category: 'flutter_dart',
+          ),
+        ],
+      );
+      final current = OtaSnapshot(
+        flutterDir: '/app',
+        files: [
+          OtaFileEntry(
+            path: 'Runner/AppDelegate.swift',
+            hash: 'a2',
+            size: 1,
+            category: 'ios',
+          ),
+          OtaFileEntry(
+            path: 'lib/main.dart',
+            hash: 'd2',
+            size: 1,
+            category: 'flutter_dart',
+          ),
+        ],
+      );
+      final ignore = FlutterPatchIgnore.parse('UnityLibrary/\n');
+
+      final changes = compareOtaSnapshots(baseline, current, ignore: ignore);
+      expect(
+        changes.map((c) => c.path),
+        isNot(contains('UnityLibrary/Classes/A.h')),
+      );
+      expect(
+        changes.any(
+          (c) =>
+              c.path == 'Runner/AppDelegate.swift' &&
+              c.kind == FileChangeKind.modified,
+        ),
+        isTrue,
+      );
+      expect(
+        changes.any(
+          (c) =>
+              c.path == 'lib/main.dart' && c.kind == FileChangeKind.modified,
+        ),
+        isTrue,
+      );
+    });
+
     test('scanFlutterAssets skips ignored assets', () async {
       final flutter = await makeApp();
-      File(p.join(flutter.path, '.meta_otaignore')).writeAsStringSync('''
+      File(p.join(flutter.path, '.flutterpatchignore')).writeAsStringSync('''
 assets/skip.txt
 ''');
 

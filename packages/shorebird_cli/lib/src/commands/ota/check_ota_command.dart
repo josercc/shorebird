@@ -1,4 +1,8 @@
+import 'dart:io';
+
 import 'package:mason_logger/mason_logger.dart';
+import 'package:path/path.dart' as p;
+import 'package:shorebird_cli/src/cache.dart';
 import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
 import 'package:shorebird_cli/src/config/config.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
@@ -54,6 +58,12 @@ class CheckOtaCommand extends ShorebirdCommand {
             '(default: <flutter>/flutterpatch_snapshot.json).',
       )
       ..addOption(
+        'unsupported-out',
+        help:
+            'Write unsupported (native / platform) file changes as JSON '
+            'to this path. Written even when the list is empty.',
+      )
+      ..addOption(
         'baseline',
         help:
             'Local baseline snapshot path '
@@ -84,6 +94,13 @@ class CheckOtaCommand extends ShorebirdCommand {
             'native trees, load matching [android]/[ios] ignore sections, '
             'and filter the server baseline. '
             'Without this flag both platforms are checked.',
+      )
+      ..addFlag(
+        'refresh-baseline',
+        negatable: false,
+        help:
+            'Ignore local server-baseline content cache and re-download '
+            '(with --version).',
       )
       ..addOption(
         'app-id',
@@ -170,11 +187,18 @@ class CheckOtaCommand extends ShorebirdCommand {
         }
 
         logger.info('==> Fetching server baseline: $version (app_id=$appId)');
+        final baselineCache = BaselineContentCache(
+          Directory(
+            p.join(Cache.shorebirdFlutterpatchDirectory.path, 'baselines'),
+          ),
+        );
         final baseline = await fetchServerBaseline(
           client: codePushClientWrapper.codePushClient,
           appId: appId,
           releaseVersion: version,
           platform: platform,
+          cache: baselineCache,
+          forceRefresh: results['refresh-baseline'] == true,
         );
         serverSnapshot = baseline.snapshot;
         snapNumber = baseline.snapshotNumber;
@@ -226,6 +250,18 @@ class CheckOtaCommand extends ShorebirdCommand {
         emitJsonSuccess(result.toJson());
       } else {
         printCheckOtaReport(result);
+      }
+
+      final unsupportedOut =
+          (results['unsupported-out'] as String?)?.trim();
+      if (unsupportedOut != null && unsupportedOut.isNotEmpty) {
+        writeUnsupportedFilesJson(result, unsupportedOut);
+        if (!isJsonMode) {
+          logger.info(
+            'Wrote unsupported files JSON → $unsupportedOut '
+            '(${result.blockingChanges.length})',
+          );
+        }
       }
 
       // 2 = OTA patch not applicable (no baseline / no changes / blocked).

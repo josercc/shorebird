@@ -234,6 +234,23 @@ class CheckOtaResult {
         'asset_changes': assetChanges,
         'snapshot_summary': snapshot._summaryCounts(),
       };
+
+  /// JSON payload of native/platform (non-OTA) file changes only.
+  Map<String, dynamic> unsupportedFilesToJson() => {
+        'ota_supported': otaSupported,
+        'blocking_change_count': blockingChanges.length,
+        'unsupported_files':
+            blockingChanges.map((c) => c.toJson()).toList(),
+      };
+}
+
+/// Write [CheckOtaResult.unsupportedFilesToJson] to [path].
+void writeUnsupportedFilesJson(CheckOtaResult result, String path) {
+  final file = File(p.normalize(p.absolute(path)));
+  file.parent.createSync(recursive: true);
+  file.writeAsStringSync(
+    '${const JsonEncoder.withIndent('  ').convert(result.unsupportedFilesToJson())}\n',
+  );
 }
 
 /// Whether a snapshot path/category is relevant for a platform-scoped check.
@@ -460,8 +477,9 @@ Future<CheckOtaResult> checkOta({
 /// Compare [baseline] to [current].
 ///
 /// When [ignore] is provided, paths matching local ignore rules are excluded
-/// from both snapshots before diffing. When [platform] is set, opposite-
-/// platform entries are excluded from both sides as well.
+/// from both snapshots before diffing (so newly ignored baseline entries do
+/// not appear as `removed` / blocking changes). When [platform] is set,
+/// opposite-platform entries are excluded from both sides as well.
 List<FileChange> compareOtaSnapshots(
   OtaSnapshot baseline,
   OtaSnapshot current, {
