@@ -70,6 +70,14 @@ class CheckOtaCommand extends ShorebirdCommand {
             'to this path. Written even when the list is empty.',
       )
       ..addOption(
+        'resources-out',
+        help:
+            'Write the hot-update resource config JSON to this path: '
+            'full local inventory (`resources`), incremental '
+            '(`asset_changes`), and unsupported '
+            '(`unsupported_asset_changes`). Written even when empty.',
+      )
+      ..addOption(
         'baseline',
         help:
             'Local baseline snapshot path '
@@ -172,6 +180,20 @@ class CheckOtaCommand extends ShorebirdCommand {
       String? releaseVersion;
       final ignore = FlutterPatchIgnore.load(flutterPath, platform: platform);
 
+      // Always scan local assets for the full inventory. Diff against the
+      // server resource baseline only when that baseline exists.
+      final localAssets = await scanFlutterAssets(
+        appDir: flutterPath,
+        outPath: null,
+        includeDev: results['include-dev'] == true,
+        releaseVersion: version,
+        ignore: ignore,
+      );
+      final resources = <Map<String, Object?>>[
+        for (final r in localAssets.resources)
+          Map<String, Object?>.from(r.toJson()),
+      ];
+
       if (version != null) {
         try {
           await shorebirdValidator.validatePreconditions(
@@ -213,13 +235,6 @@ class CheckOtaCommand extends ShorebirdCommand {
         releaseVersion = version;
 
         if (baseline.resourceAssets.isNotEmpty) {
-          final localAssets = await scanFlutterAssets(
-            appDir: flutterPath,
-            outPath: null,
-            includeDev: results['include-dev'] == true,
-            releaseVersion: version,
-            ignore: ignore,
-          );
           final unsupported =
               FlutterPatchIgnore.loadUnsupported(flutterPath, platform: platform);
           final classified = diffAndClassifyScannedAssets(
@@ -250,6 +265,7 @@ class CheckOtaCommand extends ShorebirdCommand {
         releaseVersion: releaseVersion,
         serverSnapshotNumber: snapNumber,
         serverResourceNumber: resNumber,
+        resources: resources,
         assetChanges: assetChanges,
         unsupportedAssetChanges: unsupportedAssetChanges,
         writeSnapshot: results['write'] != false,
@@ -285,6 +301,19 @@ class CheckOtaCommand extends ShorebirdCommand {
             'Wrote supported files JSON → $supportedOut '
             '(${result.patchableChanges.length} files, '
             '${result.assetChanges.length} assets)',
+          );
+        }
+      }
+
+      final resourcesOut = (results['resources-out'] as String?)?.trim();
+      if (resourcesOut != null && resourcesOut.isNotEmpty) {
+        writeResourcesJson(result, resourcesOut);
+        if (!isJsonMode) {
+          logger.info(
+            'Wrote resources JSON → $resourcesOut '
+            '(${result.resources.length} resources, '
+            '${result.assetChanges.length} changes, '
+            '${result.unsupportedAssetChanges.length} unsupported)',
           );
         }
       }

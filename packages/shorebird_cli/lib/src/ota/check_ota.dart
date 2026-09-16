@@ -176,6 +176,7 @@ class CheckOtaResult {
     this.serverSnapshotNumber,
     this.serverResourceNumber,
     this.changes = const [],
+    this.resources = const [],
     this.assetChanges = const [],
     this.unsupportedAssetChanges = const [],
   });
@@ -193,6 +194,11 @@ class CheckOtaResult {
   final int? serverSnapshotNumber;
   final int? serverResourceNumber;
   final List<FileChange> changes;
+
+  /// Full local Flutter asset inventory (current scan; not a diff).
+  ///
+  /// Each entry matches [ScannedAsset.toJson] (`package`, `path`, `hash`, …).
+  final List<Map<String, Object?>> resources;
 
   /// Hot-updatable asset inventory diff (`add`/`update`/`remove`).
   final List<Map<String, Object?>> assetChanges;
@@ -237,9 +243,11 @@ class CheckOtaResult {
         'change_count': changes.length,
         'patchable_change_count': patchableChanges.length,
         'blocking_change_count': blockingChanges.length,
+        'resource_count': resources.length,
         'asset_change_count': assetChanges.length,
         'unsupported_asset_change_count': unsupportedAssetChanges.length,
         'changes': changes.map((c) => c.toJson()).toList(),
+        'resources': resources,
         'asset_changes': assetChanges,
         'unsupported_asset_changes': unsupportedAssetChanges,
         'snapshot_summary': snapshot._summaryCounts(),
@@ -259,9 +267,23 @@ class CheckOtaResult {
   Map<String, dynamic> supportedFilesToJson() => {
         'ota_supported': otaSupported,
         'patchable_change_count': patchableChanges.length,
+        'resource_count': resources.length,
         'asset_change_count': assetChanges.length,
         'supported_files': patchableChanges.map((c) => c.toJson()).toList(),
+        'resources': resources,
         'asset_changes': assetChanges,
+      };
+
+  /// JSON payload of the hot-update resource config:
+  /// full inventory + incremental changes + unsupported changes.
+  Map<String, dynamic> resourcesToJson() => {
+        'ota_supported': otaSupported,
+        'resource_count': resources.length,
+        'resources': resources,
+        'asset_change_count': assetChanges.length,
+        'asset_changes': assetChanges,
+        'unsupported_asset_change_count': unsupportedAssetChanges.length,
+        'unsupported_asset_changes': unsupportedAssetChanges,
       };
 }
 
@@ -280,6 +302,15 @@ void writeSupportedFilesJson(CheckOtaResult result, String path) {
   file.parent.createSync(recursive: true);
   file.writeAsStringSync(
     '${const JsonEncoder.withIndent('  ').convert(result.supportedFilesToJson())}\n',
+  );
+}
+
+/// Write [CheckOtaResult.resourcesToJson] to [path].
+void writeResourcesJson(CheckOtaResult result, String path) {
+  final file = File(p.normalize(p.absolute(path)));
+  file.parent.createSync(recursive: true);
+  file.writeAsStringSync(
+    '${const JsonEncoder.withIndent('  ').convert(result.resourcesToJson())}\n',
   );
 }
 
@@ -357,6 +388,7 @@ Future<CheckOtaResult> checkOta({
   String? releaseVersion,
   int? serverSnapshotNumber,
   int? serverResourceNumber,
+  List<Map<String, Object?>> resources = const [],
   List<Map<String, Object?>> assetChanges = const [],
   List<Map<String, Object?>> unsupportedAssetChanges = const [],
   bool writeSnapshot = true,
@@ -492,6 +524,7 @@ Future<CheckOtaResult> checkOta({
     serverSnapshotNumber: serverSnapshotNumber,
     serverResourceNumber: serverResourceNumber,
     changes: changes,
+    resources: resources,
     assetChanges: assetChanges,
     unsupportedAssetChanges: unsupportedAssetChanges,
   );

@@ -545,4 +545,65 @@ packages:
     expect(payload['supported_files'], isEmpty);
     expect(payload['asset_changes'], isEmpty);
   });
+
+  test('resourcesToJson includes full inventory and diffs', () async {
+    final flutter = await makeApp();
+    final out = p.join(tmp.path, 'snap.json');
+    final resourcesOut = p.join(tmp.path, 'resources.json');
+
+    await checkOta(flutterDir: flutter.path, outPath: out);
+    File(p.join(flutter.path, 'assets', 'a.txt')).writeAsStringSync('asset-v2');
+
+    final resources = [
+      {
+        'package': 'demo',
+        'package_hash': null,
+        'path': 'assets/a.txt',
+        'size': 8,
+        'hash': 'abc',
+      },
+    ];
+    final assetChanges = [
+      {
+        'package': 'demo',
+        'path': 'assets/a.txt',
+        'change': 'update',
+        'hash': 'abc',
+        'size': 8,
+      },
+    ];
+    final unsupported = [
+      {
+        'package': 'demo',
+        'path': 'fonts/x.ttf',
+        'change': 'update',
+        'hash': 'def',
+        'size': 1,
+      },
+    ];
+
+    final result = await checkOta(
+      flutterDir: flutter.path,
+      outPath: out,
+      resources: resources,
+      assetChanges: assetChanges,
+      unsupportedAssetChanges: unsupported,
+    );
+
+    final payload = result.resourcesToJson();
+    expect(payload['ota_supported'], isFalse);
+    expect(payload['resource_count'], 1);
+    expect(payload['resources'], resources);
+    expect(payload['asset_change_count'], 1);
+    expect(payload['asset_changes'], assetChanges);
+    expect(payload['unsupported_asset_change_count'], 1);
+    expect(payload['unsupported_asset_changes'], unsupported);
+
+    writeResourcesJson(result, resourcesOut);
+    expect(File(resourcesOut).existsSync(), isTrue);
+    final written =
+        jsonDecode(File(resourcesOut).readAsStringSync()) as Map;
+    expect(written['resource_count'], 1);
+    expect(written['resources'], isA<List>());
+  });
 }
