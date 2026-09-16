@@ -44,7 +44,9 @@ class ScanAssetsCommand extends ShorebirdCommand {
         negatable: false,
         help:
             'Print paths that would be included (no JSON write). '
-            'Useful with .flutterpatchignore.',
+            '.flutterpatchignore excludes paths from the inventory; '
+            '.flutterpatch-unsupported-resources marks paths that cannot be hot-updated '
+            'if they change.',
       );
   }
 

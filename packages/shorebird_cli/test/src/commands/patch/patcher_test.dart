@@ -199,7 +199,10 @@ void main() {
           ..addOption('assets')
           ..addOption('baseline-assets')
           ..addOption('resource-number')
-          ..addFlag('upload-assets', defaultsTo: true);
+          ..addFlag('upload-assets', defaultsTo: true)
+          ..addFlag('force-duplicate-resources', negatable: false)
+          ..addFlag('whitelist')
+          ..addMultiOption('unique-ids');
         final args = argParser.parse([]);
         final patcher = _TestPatcher(
           argParser: argParser,
@@ -226,6 +229,7 @@ void main() {
             platform: any(named: 'platform'),
             track: any(named: 'track'),
             patchArtifactBundles: any(named: 'patchArtifactBundles'),
+            force: any(named: 'force'),
           ),
         ).thenAnswer((_) async {});
         await runScoped(
@@ -252,8 +256,350 @@ void main() {
             platform: ReleaseType.android.releasePlatform,
             track: track,
             patchArtifactBundles: artifacts,
+            force: false,
           ),
         ).called(1);
+      });
+
+      test('exits when compare finds duplicate changed_resources', () async {
+        final temp = Directory.systemTemp.createTempSync('patch_dedup_');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final baseline = File(p.join(temp.path, 'baseline.json'))
+          ..writeAsStringSync(
+            '''
+{
+  "release_version": "1.0.0+1",
+  "count": 1,
+  "resources": [
+    {"package": "app", "path": "assets/a.png", "hash": "old", "size": 1}
+  ]
+}
+''',
+          );
+        final assets = File(p.join(temp.path, 'assets.json'))
+          ..writeAsStringSync(
+            '''
+{
+  "release_version": "1.0.0+1",
+  "count": 1,
+  "resources": [
+    {"package": "app", "path": "assets/a.png", "hash": "new", "size": 2}
+  ]
+}
+''',
+          );
+
+        final argParser = ArgParser()
+          ..addOption('assets')
+          ..addOption('baseline-assets')
+          ..addOption('resource-number')
+          ..addFlag('upload-assets', defaultsTo: true)
+          ..addFlag('force-duplicate-resources', negatable: false)
+          ..addFlag('whitelist')
+          ..addMultiOption('unique-ids');
+        final args = argParser.parse([
+          '--assets=${assets.path}',
+          '--baseline-assets=${baseline.path}',
+          '--no-upload-assets',
+        ]);
+        final patcher = _TestPatcher(
+          argParser: argParser,
+          argResults: args,
+          flavor: null,
+          target: null,
+          releaseType: ReleaseType.android,
+        );
+        final codePushClientWrapper = MockCodePushClientWrapper();
+        final codePushClient = MockCodePushClient();
+        final logger = MockShorebirdLogger();
+        final shorebirdEnv = MockShorebirdEnv();
+        when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(
+          const ShorebirdYaml(appId: 'test_app_id'),
+        );
+        when(() => codePushClientWrapper.codePushClient)
+            .thenReturn(codePushClient);
+        when(
+          () => codePushClient.comparePatchResources(
+            appId: any(named: 'appId'),
+            releaseVersion: any(named: 'releaseVersion'),
+            platform: any(named: 'platform'),
+            arch: any(named: 'arch'),
+            changedResources: any(named: 'changedResources'),
+          ),
+        ).thenAnswer(
+          (_) async => const PatchResourcesCompareResult(
+            duplicate: true,
+            matchingPatchNumber: 3,
+            matchingPatchId: 'patch-3',
+          ),
+        );
+
+        await expectLater(
+          () => runScoped(
+            () async {
+              await patcher.uploadPatchArtifacts(
+                appId: 'test_app_id',
+                releaseId: 42,
+                releaseVersion: '1.0.0+1',
+                metadata: const {},
+                artifacts: {
+                  Arch.arm64: const PatchArtifactBundle(
+                    arch: 'aarch64',
+                    path: '/tmp/a.patch',
+                    hash: 'abc',
+                    size: 1,
+                  ),
+                },
+                track: DeploymentTrack.stable,
+              );
+            },
+            values: {
+              codePushClientWrapperRef.overrideWith(
+                () => codePushClientWrapper,
+              ),
+              shorebirdEnvRef.overrideWith(() => shorebirdEnv),
+              loggerRef.overrideWith(() => logger),
+            },
+          ),
+          throwsA(
+            isA<ProcessExit>().having((e) => e.exitCode, 'exitCode', isNonZero),
+          ),
+        );
+        verifyNever(
+          () => codePushClientWrapper.publishPatch(
+            appId: any(named: 'appId'),
+            releaseId: any(named: 'releaseId'),
+            metadata: any(named: 'metadata'),
+            platform: any(named: 'platform'),
+            track: any(named: 'track'),
+            patchArtifactBundles: any(named: 'patchArtifactBundles'),
+            force: any(named: 'force'),
+          ),
+        );
+        verify(
+          () => logger.err(any(that: contains('补丁 #3'))),
+        ).called(1);
+      });
+
+      test('force-duplicate-resources skips compare and publishes', () async {
+        final temp = Directory.systemTemp.createTempSync('patch_force_');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final baseline = File(p.join(temp.path, 'baseline.json'))
+          ..writeAsStringSync(
+            '''
+{
+  "release_version": "1.0.0+1",
+  "count": 1,
+  "resources": [
+    {"package": "app", "path": "assets/a.png", "hash": "old", "size": 1}
+  ]
+}
+''',
+          );
+        final assets = File(p.join(temp.path, 'assets.json'))
+          ..writeAsStringSync(
+            '''
+{
+  "release_version": "1.0.0+1",
+  "count": 1,
+  "resources": [
+    {"package": "app", "path": "assets/a.png", "hash": "new", "size": 2}
+  ]
+}
+''',
+          );
+
+        final argParser = ArgParser()
+          ..addOption('assets')
+          ..addOption('baseline-assets')
+          ..addOption('resource-number')
+          ..addFlag('upload-assets', defaultsTo: true)
+          ..addFlag('force-duplicate-resources', negatable: false)
+          ..addFlag('whitelist')
+          ..addMultiOption('unique-ids');
+        final args = argParser.parse([
+          '--assets=${assets.path}',
+          '--baseline-assets=${baseline.path}',
+          '--no-upload-assets',
+          '--force-duplicate-resources',
+        ]);
+        final patcher = _TestPatcher(
+          argParser: argParser,
+          argResults: args,
+          flavor: null,
+          target: null,
+          releaseType: ReleaseType.android,
+        );
+        final codePushClientWrapper = MockCodePushClientWrapper();
+        final codePushClient = MockCodePushClient();
+        final shorebirdEnv = MockShorebirdEnv();
+        when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(
+          const ShorebirdYaml(appId: 'test_app_id'),
+        );
+        when(() => codePushClientWrapper.codePushClient)
+            .thenReturn(codePushClient);
+        when(
+          () => codePushClientWrapper.publishPatch(
+            appId: any(named: 'appId'),
+            releaseId: any(named: 'releaseId'),
+            metadata: any(named: 'metadata'),
+            platform: any(named: 'platform'),
+            track: any(named: 'track'),
+            patchArtifactBundles: any(named: 'patchArtifactBundles'),
+            changedResources: any(named: 'changedResources'),
+            force: any(named: 'force'),
+          ),
+        ).thenAnswer((_) async {});
+
+        await runScoped(
+          () async {
+            await patcher.uploadPatchArtifacts(
+              appId: 'test_app_id',
+              releaseId: 42,
+              releaseVersion: '1.0.0+1',
+              metadata: const {},
+              artifacts: {
+                Arch.arm64: const PatchArtifactBundle(
+                  arch: 'aarch64',
+                  path: '/tmp/a.patch',
+                  hash: 'abc',
+                  size: 1,
+                ),
+              },
+              track: DeploymentTrack.stable,
+            );
+          },
+          values: {
+            codePushClientWrapperRef.overrideWith(() => codePushClientWrapper),
+            shorebirdEnvRef.overrideWith(() => shorebirdEnv),
+          },
+        );
+
+        verifyNever(
+          () => codePushClient.comparePatchResources(
+            appId: any(named: 'appId'),
+            releaseVersion: any(named: 'releaseVersion'),
+            platform: any(named: 'platform'),
+            arch: any(named: 'arch'),
+            changedResources: any(named: 'changedResources'),
+          ),
+        );
+        verify(
+          () => codePushClientWrapper.publishPatch(
+            appId: 'test_app_id',
+            releaseId: 42,
+            metadata: any(named: 'metadata'),
+            platform: ReleasePlatform.android,
+            track: DeploymentTrack.stable,
+            patchArtifactBundles: any(named: 'patchArtifactBundles'),
+            changedResources: any(named: 'changedResources'),
+            force: true,
+          ),
+        ).called(1);
+      });
+
+      test('exits when ignore-listed resources changed', () async {
+        final temp = Directory.systemTemp.createTempSync('patch_unsupported_');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        File(p.join(temp.path, '.flutterpatch-unsupported-resources')).writeAsStringSync(
+          'assets/fonts/**\n',
+        );
+        final baseline = File(p.join(temp.path, 'baseline.json'))
+          ..writeAsStringSync(
+            '''
+{
+  "release_version": "1.0.0+1",
+  "count": 1,
+  "resources": [
+    {"package": "app", "path": "assets/fonts/Roboto.ttf", "hash": "old", "size": 1}
+  ]
+}
+''',
+          );
+        final assets = File(p.join(temp.path, 'assets.json'))
+          ..writeAsStringSync(
+            '''
+{
+  "release_version": "1.0.0+1",
+  "count": 1,
+  "resources": [
+    {"package": "app", "path": "assets/fonts/Roboto.ttf", "hash": "new", "size": 2}
+  ]
+}
+''',
+          );
+
+        final argParser = ArgParser()
+          ..addOption('assets')
+          ..addOption('baseline-assets')
+          ..addOption('resource-number')
+          ..addFlag('upload-assets', defaultsTo: true)
+          ..addFlag('force-duplicate-resources', negatable: false)
+          ..addFlag('whitelist')
+          ..addMultiOption('unique-ids');
+        final args = argParser.parse([
+          '--assets=${assets.path}',
+          '--baseline-assets=${baseline.path}',
+          '--no-upload-assets',
+        ]);
+        final patcher = _TestPatcher(
+          argParser: argParser,
+          argResults: args,
+          flavor: null,
+          target: null,
+          releaseType: ReleaseType.android,
+        );
+        final codePushClientWrapper = MockCodePushClientWrapper();
+        final logger = MockShorebirdLogger();
+        final shorebirdEnv = MockShorebirdEnv();
+        when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(
+          ShorebirdYaml(appId: 'test_app_id', flutter: temp.path),
+        );
+        when(() => logger.err(any())).thenReturn(null);
+
+        await expectLater(
+          () => runScoped(
+            () async {
+              await patcher.uploadPatchArtifacts(
+                appId: 'test_app_id',
+                releaseId: 42,
+                releaseVersion: '1.0.0+1',
+                metadata: const {},
+                artifacts: {
+                  Arch.arm64: const PatchArtifactBundle(
+                    arch: 'aarch64',
+                    path: '/tmp/a.patch',
+                    hash: 'abc',
+                    size: 1,
+                  ),
+                },
+                track: DeploymentTrack.stable,
+              );
+            },
+            values: {
+              codePushClientWrapperRef.overrideWith(() => codePushClientWrapper),
+              loggerRef.overrideWith(() => logger),
+              shorebirdEnvRef.overrideWith(() => shorebirdEnv),
+            },
+          ),
+          throwsA(
+            isA<ProcessExit>().having((e) => e.exitCode, 'exitCode', isNonZero),
+          ),
+        );
+
+        verify(
+          () => logger.err(any(that: contains('不支持热更'))),
+        ).called(1);
+        verifyNever(
+          () => codePushClientWrapper.publishPatch(
+            appId: any(named: 'appId'),
+            releaseId: any(named: 'releaseId'),
+            metadata: any(named: 'metadata'),
+            platform: any(named: 'platform'),
+            track: any(named: 'track'),
+            patchArtifactBundles: any(named: 'patchArtifactBundles'),
+          ),
+        );
       });
     });
 

@@ -115,9 +115,11 @@ To target the latest release (e.g. the release that was most recently updated) u
         'assets',
         help:
             'Current scan-assets JSON; with --baseline-assets, diffs are '
-            'uploaded as changed_resources on the patch. When omitted, '
-            'shorebird.yaml upload_patch_resources: true auto-scans and '
-            'diffs against the server baseline for this release version.',
+            'uploaded as changed_resources on the patch. Paths listed in '
+            '.flutterpatch-unsupported-resources that changed abort the patch (full '
+            'release required). When omitted, shorebird.yaml '
+            'upload_patch_resources: true auto-scans and diffs against the '
+            'server baseline for this release version.',
       )
       ..addOption(
         'baseline-assets',
@@ -138,6 +140,29 @@ To target the latest release (e.g. the release that was most recently updated) u
         help:
             'Upload add/update changed resource files to the control plane '
             '(content-addressed, deduped).',
+      )
+      ..addFlag(
+        'force-duplicate-resources',
+        negatable: false,
+        help:
+            'Upload even if the same changed_resources were already published '
+            'as a patch for this release.',
+      )
+      ..addFlag(
+        'whitelist',
+        defaultsTo: false,
+        help:
+            'Enable device allowlist for this patch (server-side). '
+            'When enabled with no --unique-ids, no device can update until '
+            'IDs are added. Use --no-whitelist for a full rollout.',
+      )
+      ..addMultiOption(
+        'unique-ids',
+        help:
+            'client_id values allowed to receive this patch when --whitelist '
+            'is on (comma-separated or repeated). Ignored when whitelist is '
+            'off.',
+        splitCommas: true,
       )
       ..addOption(
         CommonArguments.exportOptionsPlistArg.name,

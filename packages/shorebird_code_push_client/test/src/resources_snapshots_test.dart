@@ -181,5 +181,173 @@ void main() {
       expect(body['resource_number'], 2);
       expect(body['platform'], 'android');
     });
+
+    test('comparePatchResources parses duplicate response', () async {
+      when(() => httpClient.send(any())).thenAnswer((invocation) async {
+        final request = invocation.positionalArguments.first as http.BaseRequest;
+        expect(request.url.path, '/admin/v1/patches/compare');
+        expect(request.method, 'POST');
+        return http.StreamedResponse(
+          Stream.value(
+            utf8.encode(
+              jsonEncode({
+                'duplicate': true,
+                'matching_patch_number': 7,
+                'matching_patch_id': 'patch-uuid-7',
+              }),
+            ),
+          ),
+          200,
+        );
+      });
+
+      final result = await client.comparePatchResources(
+        appId: appId,
+        releaseVersion: version,
+        platform: 'android',
+        arch: 'aarch64',
+        changedResources: [
+          {
+            'package': 'app',
+            'path': 'assets/a.png',
+            'hash': 'h',
+            'change': 'add',
+          },
+        ],
+      );
+      expect(result.duplicate, isTrue);
+      expect(result.matchingPatchNumber, 7);
+      expect(result.matchingPatchId, 'patch-uuid-7');
+    });
+
+    test('comparePatchResources parses non-duplicate response', () async {
+      when(() => httpClient.send(any())).thenAnswer(
+        (_) async => http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode({'duplicate': false}))),
+          200,
+        ),
+      );
+
+      final result = await client.comparePatchResources(
+        appId: appId,
+        releaseVersion: version,
+        platform: 'android',
+        arch: 'aarch64',
+        changedResources: const [],
+      );
+      expect(result.duplicate, isFalse);
+      expect(result.matchingPatchNumber, isNull);
+    });
+
+    test('createPatchArtifact sends force when requested', () async {
+      final temp = await Directory.systemTemp.createTemp('fp_force_');
+      final artifact = File('${temp.path}/diff.patch')
+        ..writeAsBytesSync(List<int>.filled(32, 2));
+      addTearDown(() => temp.delete(recursive: true));
+
+      http.Request? captured;
+      when(() => httpClient.send(any())).thenAnswer((invocation) async {
+        final request = invocation.positionalArguments.first as http.BaseRequest;
+        if (request is http.Request && request.url.path.endsWith('/patches')) {
+          captured = request;
+          return http.StreamedResponse(
+            Stream.value(
+              utf8.encode(jsonEncode({'id': 'patch-force', 'number': 4})),
+            ),
+            201,
+          );
+        }
+        return http.StreamedResponse(
+          Stream.value(utf8.encode('{}')),
+          200,
+        );
+      });
+
+      final release = await client.createRelease(
+        appId: appId,
+        version: version,
+        flutterRevision: 'rev',
+      );
+      final patch = await client.createPatch(
+        appId: appId,
+        releaseId: release.id,
+        metadata: const {},
+        changedResources: [
+          {
+            'package': 'app',
+            'path': 'assets/a.png',
+            'hash': 'h',
+            'change': 'add',
+          },
+        ],
+        force: true,
+      );
+
+      await client.createPatchArtifact(
+        artifactPath: artifact.path,
+        appId: appId,
+        patchId: patch.id,
+        arch: 'aarch64',
+        platform: ReleasePlatform.android,
+        hash: 'deadbeef',
+      );
+
+      expect(captured, isNotNull);
+      final body = jsonDecode(captured!.body) as Map<String, dynamic>;
+      expect(body['force'], isTrue);
+      expect(body['changed_resources'], isA<List>());
+    });
+
+    test('createPatchArtifact sends whitelist_enabled and unique_ids', () async {
+      final temp = await Directory.systemTemp.createTemp('fp_wl_');
+      final artifact = File('${temp.path}/diff.patch')
+        ..writeAsBytesSync(List<int>.filled(32, 3));
+      addTearDown(() => temp.delete(recursive: true));
+
+      http.Request? captured;
+      when(() => httpClient.send(any())).thenAnswer((invocation) async {
+        final request = invocation.positionalArguments.first as http.BaseRequest;
+        if (request is http.Request && request.url.path.endsWith('/patches')) {
+          captured = request;
+          return http.StreamedResponse(
+            Stream.value(
+              utf8.encode(jsonEncode({'id': 'patch-wl', 'number': 5})),
+            ),
+            201,
+          );
+        }
+        return http.StreamedResponse(
+          Stream.value(utf8.encode('{}')),
+          200,
+        );
+      });
+
+      final release = await client.createRelease(
+        appId: appId,
+        version: version,
+        flutterRevision: 'rev',
+      );
+      final patch = await client.createPatch(
+        appId: appId,
+        releaseId: release.id,
+        metadata: const {},
+        whitelistEnabled: true,
+        uniqueIds: const ['device-a', 'device-b'],
+      );
+
+      await client.createPatchArtifact(
+        artifactPath: artifact.path,
+        appId: appId,
+        patchId: patch.id,
+        arch: 'aarch64',
+        platform: ReleasePlatform.android,
+        hash: 'cafebabe',
+      );
+
+      expect(captured, isNotNull);
+      final body = jsonDecode(captured!.body) as Map<String, dynamic>;
+      expect(body['whitelist_enabled'], isTrue);
+      expect(body['unique_ids'], ['device-a', 'device-b']);
+    });
   });
 }

@@ -129,6 +129,24 @@ frameworks
       expect(ignore.isEmpty, isTrue);
       expect(ignore.filePath, isNull);
     });
+
+    test('loadUnsupported reads .flutterpatch-unsupported-resources', () {
+      final dir = Directory.systemTemp.createTempSync('flutterpatch_unsup_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      File(p.join(dir.path, '.flutterpatch-unsupported-resources'))
+          .writeAsStringSync('assets/fonts/**\n');
+      File(p.join(dir.path, '.flutterpatchignore'))
+          .writeAsStringSync('assets/tmp/**\n');
+
+      final unsupported = FlutterPatchIgnore.loadUnsupported(dir.path);
+      expect(unsupported.filePath, endsWith('.flutterpatch-unsupported-resources'));
+      expect(unsupported.isIgnored('assets/fonts/a.ttf'), isTrue);
+      expect(unsupported.isIgnored('assets/tmp/x.png'), isFalse);
+
+      final ignore = FlutterPatchIgnore.load(dir.path);
+      expect(ignore.isIgnored('assets/tmp/x.png'), isTrue);
+      expect(ignore.isIgnored('assets/fonts/a.ttf'), isFalse);
+    });
   });
 
   group('scan respects .flutterpatchignore', () {
@@ -317,6 +335,22 @@ assets/skip.txt
       final paths = result.resources.map((r) => r.path).toSet();
       expect(paths, contains('assets/a.txt'));
       expect(paths, isNot(contains('assets/skip.txt')));
+    });
+
+    test('scanFlutterAssets keeps unsupported-listed assets', () async {
+      final flutter = await makeApp();
+      File(p.join(flutter.path, '.flutterpatch-unsupported-resources'))
+          .writeAsStringSync('''
+assets/skip.txt
+''');
+
+      final result = await scanFlutterAssets(
+        appDir: flutter.path,
+        writeConfig: false,
+      );
+      final paths = result.resources.map((r) => r.path).toSet();
+      expect(paths, contains('assets/a.txt'));
+      expect(paths, contains('assets/skip.txt'));
     });
   });
 }

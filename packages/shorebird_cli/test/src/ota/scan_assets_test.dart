@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:shorebird_cli/src/ota/ignore_rules.dart';
 import 'package:shorebird_cli/src/ota/scan_assets.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -294,5 +295,106 @@ packages:
     expect(changes.firstWhere((c) => c['change'] == 'update')['path'], 'a.png');
     expect(changes.firstWhere((c) => c['change'] == 'add')['path'], 'b.png');
     expect(changes.firstWhere((c) => c['change'] == 'remove')['path'], 'gone.png');
+  });
+
+  test('diffAndClassifyScannedAssets splits unsupported-matched changes', () {
+    final baseline = [
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'assets/a.png',
+        size: 1,
+        hash: 'h1',
+      ),
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'assets/fonts/Roboto.ttf',
+        size: 2,
+        hash: 'fold',
+      ),
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'assets/noise.txt',
+        size: 1,
+        hash: 'n1',
+      ),
+    ];
+    final next = [
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'assets/a.png',
+        size: 9,
+        hash: 'h9',
+      ),
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'assets/fonts/Roboto.ttf',
+        size: 3,
+        hash: 'fnew',
+      ),
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'assets/noise.txt',
+        size: 2,
+        hash: 'n2',
+      ),
+    ];
+    final ignore = FlutterPatchIgnore.parse('assets/noise.txt\n');
+    final unsupported = FlutterPatchIgnore.parse('assets/fonts/**\n*.ttf\n');
+    final classified = diffAndClassifyScannedAssets(
+      baseline: baseline,
+      next: next,
+      ignore: ignore,
+      unsupported: unsupported,
+    );
+    expect(classified.hasUnsupported, isTrue);
+    expect(classified.hotChanges, hasLength(1));
+    expect(classified.hotChanges.single['path'], 'assets/a.png');
+    expect(classified.unsupportedChanges, hasLength(1));
+    expect(
+      classified.unsupportedChanges.single['path'],
+      'assets/fonts/Roboto.ttf',
+    );
+    // Ignored noise change is not compared at all.
+    expect(
+      classified.hotChanges.any((c) => c['path'] == 'assets/noise.txt'),
+      isFalse,
+    );
+    expect(
+      unsupportedResourceChangesMessage(classified.unsupportedChanges),
+      contains('.flutterpatch-unsupported-resources'),
+    );
+  });
+
+  test('diffAndClassifyScannedAssets with empty unsupported keeps all hot', () {
+    final baseline = [
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'a.png',
+        size: 1,
+        hash: 'h1',
+      ),
+    ];
+    final next = [
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'a.png',
+        size: 2,
+        hash: 'h2',
+      ),
+    ];
+    final classified = diffAndClassifyScannedAssets(
+      baseline: baseline,
+      next: next,
+    );
+    expect(classified.hasUnsupported, isFalse);
+    expect(classified.hotChanges, hasLength(1));
   });
 }

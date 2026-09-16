@@ -14,8 +14,10 @@ void printIgnoreNotice(FlutterPatchIgnore ignore) {
   } else {
     stderr.writeln(
       '==> No $flutterPatchIgnoreFileName '
-      '(add one at the project root to exclude paths; '
-      'use [android]/[ios] sections for platform-specific rules)',
+      '(add one at the project root to exclude paths from comparison; '
+      'use $flutterPatchUnsupportedResourcesFileName for fonts etc. that cannot '
+      'be hot-updated if they change; '
+      '[android]/[ios] sections for platform-specific rules)',
     );
   }
 }

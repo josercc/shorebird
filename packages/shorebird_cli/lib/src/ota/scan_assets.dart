@@ -80,16 +80,23 @@ Future<ScanAssetsResult> scanFlutterAssets({
     throw StateError('不是 Flutter/Dart 工程：缺少 pubspec.yaml ($root)');
   }
 
-  final packageConfigFile = File(p.join(root, '.dart_tool', 'package_config.json'));
+  final packageConfigFile = File(
+    p.join(root, '.dart_tool', 'package_config.json'),
+  );
   if (!packageConfigFile.existsSync()) {
     throw StateError(
       '缺少 .dart_tool/package_config.json，请先在工程目录执行: flutter pub get',
     );
   }
 
+  // `.flutterpatchignore` excludes paths from inventory (do not compare).
+  // Unsupported-for-hot-update paths live in `.flutterpatch-unsupported-resources` and
+  // remain in the inventory so patch can detect changes.
   final ignoreRules = ignore ?? FlutterPatchIgnore.load(root);
   final lockHashes = _loadPackageHashes(File(p.join(root, 'pubspec.lock')));
-  final lockKinds = _loadPackageDependencyKinds(File(p.join(root, 'pubspec.lock')));
+  final lockKinds = _loadPackageDependencyKinds(
+    File(p.join(root, 'pubspec.lock')),
+  );
   final packages = _loadPackages(packageConfigFile);
 
   final rootPubspec = loadYaml(pubspecFile.readAsStringSync());
@@ -482,13 +489,36 @@ List<ScannedAsset> loadScannedAssetsFromFile(String path) {
   }).toList();
 }
 
+/// Result of diffing asset inventories, split by `.flutterpatch-unsupported-resources`.
+///
+/// Paths matching unsupported rules are **not hot-updatable** (e.g. fonts).
+/// If [unsupportedChanges] is non-empty, callers must abort the patch/resource
+/// flow and ask for a full release.
+class ResourceDiffResult {
+  /// Creates a classified resource diff.
+  const ResourceDiffResult({
+    required this.hotChanges,
+    required this.unsupportedChanges,
+  });
+
+  /// Changes that may be uploaded as `changed_resources`.
+  final List<Map<String, Object?>> hotChanges;
+
+  /// Changes that match `.flutterpatch-unsupported-resources` and cannot be hot-updated.
+  final List<Map<String, Object?>> unsupportedChanges;
+
+  /// Whether any change is unsupported for hot-update.
+  bool get hasUnsupported => unsupportedChanges.isNotEmpty;
+}
+
 /// Diff two asset inventories → patch `changed_resources` entries.
 ///
 /// Each entry: `{package, path, hash, size, package_hash, change}` where
 /// `change` is `add` | `update` | `remove`.
 ///
-/// When [ignore] is set, assets matching local ignore rules are excluded from
-/// both sides before diffing (local ignore is authoritative).
+/// When [ignore] is set (`.flutterpatchignore`), matching assets are excluded
+/// from both sides before diffing. Pass [unsupported] via
+/// [diffAndClassifyScannedAssets] to detect non-hot-updatable changes.
 List<Map<String, Object?>> diffScannedAssets({
   required List<ScannedAsset> baseline,
   required List<ScannedAsset> next,
@@ -554,4 +584,67 @@ List<Map<String, Object?>> diffScannedAssets({
     return '${a['change']}'.compareTo('${b['change']}');
   });
   return changes;
+}
+
+/// Split [changes] into hot-updatable vs `.flutterpatch-unsupported-resources` matches.
+ResourceDiffResult classifyResourceChanges({
+  required List<Map<String, Object?>> changes,
+  FlutterPatchIgnore? unsupported,
+}) {
+  if (unsupported == null || unsupported.isEmpty) {
+    return ResourceDiffResult(
+      hotChanges: changes,
+      unsupportedChanges: const [],
+    );
+  }
+
+  final hot = <Map<String, Object?>>[];
+  final blocked = <Map<String, Object?>>[];
+  for (final c in changes) {
+    final package = '${c['package'] ?? ''}';
+    final path = '${c['path'] ?? ''}';
+    if (unsupported.isIgnoredAsset(package: package, path: path)) {
+      blocked.add(c);
+    } else {
+      hot.add(c);
+    }
+  }
+  return ResourceDiffResult(
+    hotChanges: hot,
+    unsupportedChanges: blocked,
+  );
+}
+
+/// Diff (honoring [ignore]), then classify by [unsupported].
+ResourceDiffResult diffAndClassifyScannedAssets({
+  required List<ScannedAsset> baseline,
+  required List<ScannedAsset> next,
+  FlutterPatchIgnore? ignore,
+  FlutterPatchIgnore? unsupported,
+}) {
+  return classifyResourceChanges(
+    changes: diffScannedAssets(
+      baseline: baseline,
+      next: next,
+      ignore: ignore,
+    ),
+    unsupported: unsupported,
+  );
+}
+
+/// Human-readable abort message when unsupported resource changes are present.
+String unsupportedResourceChangesMessage(
+  List<Map<String, Object?>> unsupportedChanges,
+) {
+  final buf = StringBuffer(
+    '以下资源不支持热更（见 .flutterpatch-unsupported-resources），请整包发版（release）：\n',
+  );
+  for (final c in unsupportedChanges) {
+    final package = '${c['package'] ?? ''}';
+    final path = '${c['path'] ?? ''}';
+    final change = '${c['change'] ?? ''}';
+    final label = package.isEmpty ? path : '$package/$path';
+    buf.writeln('  $label ($change)');
+  }
+  return buf.toString().trimRight();
 }

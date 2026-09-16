@@ -160,16 +160,21 @@ More info: ${troubleshootingUrl.toLink()}.
     if (hasExplicitAssetDiff) {
       final next = loadScannedAssetsFromFile(assetsPath);
       final baseline = loadScannedAssetsFromFile(baselinePath);
-      final ignore = FlutterPatchIgnore.load(_flutterProjectDir);
-      var changes = diffScannedAssets(
+      final flutterDir = _flutterProjectDir;
+      final ignore = FlutterPatchIgnore.load(flutterDir);
+      final unsupported = FlutterPatchIgnore.loadUnsupported(flutterDir);
+      final classified = diffAndClassifyScannedAssets(
         baseline: baseline,
         next: next,
         ignore: ignore,
+        unsupported: unsupported,
       );
+      _assertNoUnsupportedResourceChanges(classified);
+      var changes = classified.hotChanges;
       if (changes.isNotEmpty && _shouldUploadChangedAssets) {
         logger.info('Uploading changed Flutter assets to control plane…');
         changes = await uploadChangedResourcesToControl(
-          appDir: _flutterProjectDir,
+          appDir: flutterDir,
           changes: changes,
           client: codePushClientWrapper.codePushClient,
           onLog: logger.detail,
@@ -197,6 +202,29 @@ More info: ${troubleshootingUrl.toLink()}.
       resourceNumber = int.tryParse(resNumRaw.trim());
     }
 
+    final forceDuplicate = _forceDuplicateResources;
+    if (changedResources != null &&
+        changedResources.isNotEmpty &&
+        !forceDuplicate &&
+        releaseVersion != null &&
+        releaseVersion.isNotEmpty) {
+      await _assertChangedResourcesNotPublished(
+        appId: appId,
+        releaseVersion: releaseVersion,
+        changedResources: changedResources,
+        artifacts: artifacts,
+      );
+    }
+
+    final configureWhitelist =
+        argResults.wasParsed('whitelist') || _uniqueIds.isNotEmpty;
+    if (configureWhitelist && _whitelistEnabled && _uniqueIds.isEmpty) {
+      logger.warn(
+        'Whitelist enabled with no --unique-ids: no device can update '
+        'until allowlist IDs are added in the dashboard.',
+      );
+    }
+
     await codePushClientWrapper.publishPatch(
       appId: appId,
       releaseId: releaseId,
@@ -206,7 +234,76 @@ More info: ${troubleshootingUrl.toLink()}.
       patchArtifactBundles: artifacts,
       changedResources: changedResources,
       resourceNumber: resourceNumber,
+      force: forceDuplicate,
+      whitelistEnabled: configureWhitelist ? _whitelistEnabled : null,
+      uniqueIds: configureWhitelist ? _uniqueIds : null,
     );
+  }
+
+  bool get _forceDuplicateResources =>
+      argResults.options.contains('force-duplicate-resources') &&
+      argResults['force-duplicate-resources'] == true;
+
+  /// Whether this patch upload enables the device allowlist gate.
+  bool get _whitelistEnabled {
+    if (argResults.wasParsed('whitelist')) {
+      return argResults['whitelist'] == true;
+    }
+    // Passing --unique-ids without an explicit --no-whitelist turns the gate on.
+    return _uniqueIds.isNotEmpty;
+  }
+
+  List<String> get _uniqueIds {
+    if (!argResults.options.contains('unique-ids')) return const [];
+    final raw = argResults['unique-ids'];
+    if (raw is! List) return const [];
+    final out = <String>[];
+    final seen = <String>{};
+    for (final item in raw) {
+      final id = '$item'.trim();
+      if (id.isEmpty || !seen.add(id)) continue;
+      out.add(id);
+    }
+    return out;
+  }
+
+  /// Aborts when a published patch already has the same [changedResources].
+  Future<void> _assertChangedResourcesNotPublished({
+    required String appId,
+    required String releaseVersion,
+    required List<Map<String, dynamic>> changedResources,
+    required Map<Arch, PatchArtifactBundle> artifacts,
+  }) async {
+    final client = codePushClientWrapper.codePushClient;
+    final platform = releaseType.releasePlatform.name;
+    final arches = artifacts.isEmpty
+        ? const <String>['aarch64']
+        : artifacts.values.map((b) => b.arch).toSet();
+    for (final arch in arches) {
+      final result = await client.comparePatchResources(
+        appId: appId,
+        releaseVersion: releaseVersion,
+        platform: platform,
+        arch: arch,
+        changedResources: changedResources,
+      );
+      if (!result.duplicate) continue;
+      final number = result.matchingPatchNumber;
+      logger.err(
+        '当前变化配置已发布为补丁 #$number，跳过上传。\n'
+        '使用 --force-duplicate-resources 可强制继续。',
+      );
+      throw ProcessExit(ExitCode.software.code);
+    }
+  }
+
+  /// Aborts when [classified] contains ignore-matched (non-hot-updatable) changes.
+  void _assertNoUnsupportedResourceChanges(ResourceDiffResult classified) {
+    if (!classified.hasUnsupported) return;
+    logger.err(
+      unsupportedResourceChangesMessage(classified.unsupportedChanges),
+    );
+    throw ProcessExit(ExitCode.software.code);
   }
 
   bool get _shouldUploadChangedAssets =>
@@ -247,16 +344,25 @@ More info: ${troubleshootingUrl.toLink()}.
 
       final flutterDir = _flutterProjectDir;
       final ignore = FlutterPatchIgnore.load(flutterDir);
+      final unsupported = FlutterPatchIgnore.loadUnsupported(flutterDir);
       final scanned = await scanFlutterAssets(
         appDir: flutterDir,
         releaseVersion: releaseVersion,
         ignore: ignore,
       );
-      var changes = diffScannedAssets(
+      final classified = diffAndClassifyScannedAssets(
         baseline: baseline.resourceAssets,
         next: scanned.resources,
         ignore: ignore,
+        unsupported: unsupported,
       );
+      if (classified.hasUnsupported) {
+        progress.fail(
+          unsupportedResourceChangesMessage(classified.unsupportedChanges),
+        );
+        throw ProcessExit(ExitCode.software.code);
+      }
+      var changes = classified.hotChanges;
       if (changes.isNotEmpty && _shouldUploadChangedAssets) {
         logger.info('Uploading changed Flutter assets to control plane…');
         changes = await uploadChangedResourcesToControl(
@@ -280,6 +386,8 @@ More info: ${troubleshootingUrl.toLink()}.
         ],
         resourceNumber: baseline.resourceNumber,
       );
+    } on ProcessExit {
+      rethrow;
     } on Exception catch (error) {
       progress.fail('Failed to resolve patch resource changes: $error');
       logger.info(

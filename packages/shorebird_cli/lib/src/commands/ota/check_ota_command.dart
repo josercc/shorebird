@@ -166,6 +166,7 @@ class CheckOtaCommand extends ShorebirdCommand {
 
       OtaSnapshot? serverSnapshot;
       var assetChanges = const <Map<String, Object?>>[];
+      var unsupportedAssetChanges = const <Map<String, Object?>>[];
       int? snapNumber;
       int? resNumber;
       String? releaseVersion;
@@ -219,11 +220,16 @@ class CheckOtaCommand extends ShorebirdCommand {
             releaseVersion: version,
             ignore: ignore,
           );
-          assetChanges = diffScannedAssets(
+          final unsupported =
+              FlutterPatchIgnore.loadUnsupported(flutterPath, platform: platform);
+          final classified = diffAndClassifyScannedAssets(
             baseline: baseline.resourceAssets,
             next: localAssets.resources,
             ignore: ignore,
+            unsupported: unsupported,
           );
+          assetChanges = classified.hotChanges;
+          unsupportedAssetChanges = classified.unsupportedChanges;
         }
 
         if (serverSnapshot == null && results['baseline'] == null) {
@@ -245,6 +251,7 @@ class CheckOtaCommand extends ShorebirdCommand {
         serverSnapshotNumber: snapNumber,
         serverResourceNumber: resNumber,
         assetChanges: assetChanges,
+        unsupportedAssetChanges: unsupportedAssetChanges,
         writeSnapshot: results['write'] != false,
         skipLocalBaseline: serverSnapshot != null,
         includeDev: results['include-dev'] == true,

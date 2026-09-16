@@ -1258,6 +1258,9 @@ Release artifacts were cloned; re-run baselines manually:
     required Json metadata,
     List<Map<String, dynamic>>? changedResources,
     int? resourceNumber,
+    bool force = false,
+    bool? whitelistEnabled,
+    List<String>? uniqueIds,
   }) async {
     final createPatchProgress = logger.progress('Creating patch');
     try {
@@ -1267,6 +1270,9 @@ Release artifacts were cloned; re-run baselines manually:
         metadata: metadata,
         changedResources: changedResources,
         resourceNumber: resourceNumber,
+        force: force,
+        whitelistEnabled: whitelistEnabled,
+        uniqueIds: uniqueIds,
       );
       createPatchProgress.complete();
       return patch;
@@ -1400,6 +1406,9 @@ Release artifacts were cloned; re-run baselines manually:
     required Map<Arch, PatchArtifactBundle> patchArtifactBundles,
     List<Map<String, dynamic>>? changedResources,
     int? resourceNumber,
+    bool force = false,
+    bool? whitelistEnabled,
+    List<String>? uniqueIds,
   }) async {
     final patch = await createPatch(
       appId: appId,
@@ -1407,6 +1416,9 @@ Release artifacts were cloned; re-run baselines manually:
       metadata: metadata,
       changedResources: changedResources,
       resourceNumber: resourceNumber,
+      force: force,
+      whitelistEnabled: whitelistEnabled,
+      uniqueIds: uniqueIds,
     );
 
     await createPatchArtifacts(

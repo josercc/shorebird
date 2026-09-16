@@ -177,6 +177,7 @@ class CheckOtaResult {
     this.serverResourceNumber,
     this.changes = const [],
     this.assetChanges = const [],
+    this.unsupportedAssetChanges = const [],
   });
 
   final OtaSnapshot snapshot;
@@ -193,12 +194,18 @@ class CheckOtaResult {
   final int? serverResourceNumber;
   final List<FileChange> changes;
 
-  /// Asset inventory diff vs server/local resource config (`add`/`update`/`remove`).
+  /// Hot-updatable asset inventory diff (`add`/`update`/`remove`).
   final List<Map<String, Object?>> assetChanges;
+
+  /// Asset changes matching `.flutterpatch-unsupported-resources` (cannot hot-update).
+  final List<Map<String, Object?>> unsupportedAssetChanges;
 
   bool get hasBaseline => baselineSource != null;
 
-  bool get hasChanges => changes.isNotEmpty || assetChanges.isNotEmpty;
+  bool get hasChanges =>
+      changes.isNotEmpty ||
+      assetChanges.isNotEmpty ||
+      unsupportedAssetChanges.isNotEmpty;
 
   List<FileChange> get patchableChanges =>
       changes.where((c) => c.isPatchable).toList();
@@ -207,11 +214,12 @@ class CheckOtaResult {
       changes.where((c) => c.isBlocking).toList();
 
   /// `true` only when a baseline exists and there are patchable Dart/asset
-  /// changes with no native/platform blockers. No baseline, no changes, or any
-  /// blocking change → `false` (cannot / need not ship an OTA patch).
+  /// changes with no native/platform blockers and no unsupported asset
+  /// changes. No baseline, no changes, or any blocker → `false`.
   bool get otaSupported {
     if (!hasBaseline) return false;
     if (blockingChanges.isNotEmpty) return false;
+    if (unsupportedAssetChanges.isNotEmpty) return false;
     return patchableChanges.isNotEmpty || assetChanges.isNotEmpty;
   }
 
@@ -230,8 +238,10 @@ class CheckOtaResult {
         'patchable_change_count': patchableChanges.length,
         'blocking_change_count': blockingChanges.length,
         'asset_change_count': assetChanges.length,
+        'unsupported_asset_change_count': unsupportedAssetChanges.length,
         'changes': changes.map((c) => c.toJson()).toList(),
         'asset_changes': assetChanges,
+        'unsupported_asset_changes': unsupportedAssetChanges,
         'snapshot_summary': snapshot._summaryCounts(),
       };
 
@@ -239,8 +249,10 @@ class CheckOtaResult {
   Map<String, dynamic> unsupportedFilesToJson() => {
         'ota_supported': otaSupported,
         'blocking_change_count': blockingChanges.length,
+        'unsupported_asset_change_count': unsupportedAssetChanges.length,
         'unsupported_files':
             blockingChanges.map((c) => c.toJson()).toList(),
+        'unsupported_asset_changes': unsupportedAssetChanges,
       };
 
   /// JSON payload of Dart / Flutter-asset (OTA-patchable) file changes only.
@@ -346,6 +358,7 @@ Future<CheckOtaResult> checkOta({
   int? serverSnapshotNumber,
   int? serverResourceNumber,
   List<Map<String, Object?>> assetChanges = const [],
+  List<Map<String, Object?>> unsupportedAssetChanges = const [],
   bool writeSnapshot = true,
   bool skipLocalBaseline = false,
   bool includeDev = false,
@@ -449,9 +462,10 @@ Future<CheckOtaResult> checkOta({
     }
   }
 
-  // Local ignore is authoritative: ignored paths are excluded from both sides
-  // of the diff (so a baseline entry that is now ignored is not a "remove").
-  // Platform filter likewise drops opposite-platform baseline entries.
+  // Local ignore is authoritative for snapshot/native trees: ignored paths
+  // are excluded from both sides of the diff. Platform filter likewise drops
+  // opposite-platform baseline entries. Asset hot/unsupported split is done
+  // by the caller via [diffAndClassifyScannedAssets].
   final changes = baseline == null
       ? const <FileChange>[]
       : compareOtaSnapshots(
@@ -460,16 +474,6 @@ Future<CheckOtaResult> checkOta({
           ignore: ignoreRules,
           platform: scopedPlatform,
         );
-
-  final filteredAssetChanges = ignoreRules.isEmpty
-      ? assetChanges
-      : assetChanges
-          .where((c) {
-            final pkg = '${c['package'] ?? ''}';
-            final path = '${c['path'] ?? ''}';
-            return !ignoreRules.isIgnoredAsset(package: pkg, path: path);
-          })
-          .toList();
 
   if (writeSnapshot) {
     final outFile = File(output);
@@ -488,7 +492,8 @@ Future<CheckOtaResult> checkOta({
     serverSnapshotNumber: serverSnapshotNumber,
     serverResourceNumber: serverResourceNumber,
     changes: changes,
-    assetChanges: filteredAssetChanges,
+    assetChanges: assetChanges,
+    unsupportedAssetChanges: unsupportedAssetChanges,
   );
 }
 
@@ -571,6 +576,13 @@ void printCheckOtaReport(CheckOtaResult result) {
       };
       stdout.writeln('  $tag [${c.category}] ${c.path}');
     }
+    return;
+  }
+
+  if (result.unsupportedAssetChanges.isNotEmpty) {
+    stdout.writeln(
+      unsupportedResourceChangesMessage(result.unsupportedAssetChanges),
+    );
     return;
   }
 

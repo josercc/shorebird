@@ -66,6 +66,25 @@ class CodePushUpgradeRequiredException extends CodePushException {
   });
 }
 
+/// Result of [CodePushClient.comparePatchResources].
+class PatchResourcesCompareResult {
+  /// Creates a compare result.
+  const PatchResourcesCompareResult({
+    required this.duplicate,
+    this.matchingPatchNumber,
+    this.matchingPatchId,
+  });
+
+  /// Whether a published patch already has the same changed_resources.
+  final bool duplicate;
+
+  /// Patch number of the matching published patch, if any.
+  final int? matchingPatchNumber;
+
+  /// Patch id of the matching published patch, if any.
+  final String? matchingPatchId;
+}
+
 class _CodePushHttpClient extends http.BaseClient {
   _CodePushHttpClient(this._client, this._headers);
 
@@ -92,6 +111,9 @@ class _PendingPatch {
     required this.releaseVersion,
     this.changedResources,
     this.resourceNumber,
+    this.force = false,
+    this.whitelistEnabled,
+    this.uniqueIds,
   });
 
   final String appId;
@@ -99,6 +121,9 @@ class _PendingPatch {
   final String releaseVersion;
   final List<Map<String, dynamic>>? changedResources;
   final int? resourceNumber;
+  final bool force;
+  final bool? whitelistEnabled;
+  final List<String>? uniqueIds;
   final List<String> remotePatchIds = [];
   int? number;
 }
@@ -244,12 +269,17 @@ class CodePushClient {
   ///
   /// Optional [changedResources] / [resourceNumber] are attached to every
   /// subsequent [createPatchArtifact] POST for this patch (Flutter asset OTA).
+  /// When [force] is true, the create request skips duplicate changed_resources
+  /// checks on the control plane.
   Future<Patch> createPatch({
     required String appId,
     required int releaseId,
     required Json metadata,
     List<Map<String, dynamic>>? changedResources,
     int? resourceNumber,
+    bool force = false,
+    bool? whitelistEnabled,
+    List<String>? uniqueIds,
   }) async {
     final release = _releases[releaseId];
     final version = release?.version;
@@ -278,6 +308,9 @@ class CodePushClient {
       releaseVersion: cached.version,
       changedResources: changedResources,
       resourceNumber: resourceNumber,
+      force: force,
+      whitelistEnabled: whitelistEnabled,
+      uniqueIds: uniqueIds,
     );
     return Patch(id: id, number: 0);
   }
@@ -294,6 +327,9 @@ class CodePushClient {
     String? podfileLockHash,
     List<Map<String, dynamic>>? changedResources,
     int? resourceNumber,
+    bool? force,
+    bool? whitelistEnabled,
+    List<String>? uniqueIds,
   }) async {
     final pending = _pendingPatches[patchId];
     if (pending == null) {
@@ -304,6 +340,9 @@ class CodePushClient {
 
     final resources = changedResources ?? pending.changedResources;
     final resNumber = resourceNumber ?? pending.resourceNumber;
+    final forceUpload = force ?? pending.force;
+    final whitelistOn = whitelistEnabled ?? pending.whitelistEnabled;
+    final ids = uniqueIds ?? pending.uniqueIds;
 
     final bytes = await File(artifactPath).readAsBytes();
     final body = <String, dynamic>{
@@ -318,6 +357,9 @@ class CodePushClient {
       if (resources != null && resources.isNotEmpty)
         'changed_resources': resources,
       if (resNumber != null) 'resource_number': resNumber,
+      if (forceUpload) 'force': true,
+      if (whitelistOn != null) 'whitelist_enabled': whitelistOn,
+      if (ids != null) 'unique_ids': ids,
     };
 
     final response = await _httpClient.post(
@@ -353,6 +395,35 @@ class CodePushClient {
         },
       );
     }
+  }
+
+  /// Compares candidate [changedResources] against published patches for the
+  /// given release/platform/arch (`POST /admin/v1/patches/compare`).
+  Future<PatchResourcesCompareResult> comparePatchResources({
+    required String appId,
+    required String releaseVersion,
+    required String platform,
+    required String arch,
+    required List<Map<String, dynamic>> changedResources,
+  }) async {
+    final response = await _httpClient.post(
+      Uri.parse('$_admin/patches/compare'),
+      headers: {'content-type': 'application/json'},
+      body: json.encode({
+        'app_id': appId,
+        'release_version': releaseVersion,
+        'platform': platform,
+        'arch': arch,
+        'changed_resources': changedResources,
+      }),
+    );
+    if (!response.isSuccess) _throw(response);
+    final body = await _json(response);
+    return PatchResourcesCompareResult(
+      duplicate: body['duplicate'] == true,
+      matchingPatchNumber: (body['matching_patch_number'] as num?)?.toInt(),
+      matchingPatchId: body['matching_patch_id'] as String?,
+    );
   }
 
   // ---------------------------------------------------------------------------

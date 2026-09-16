@@ -4,17 +4,26 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 /// Ignore file name under the Flutter project root (or a parent dir).
+///
+/// Matching paths are **excluded from comparison / inventory** (noise).
 const String flutterPatchIgnoreFileName = '.flutterpatchignore';
 
 /// Legacy meta_ota ignore file (still loaded for compatibility).
 const String metaOtaIgnoreFileName = '.meta_otaignore';
 
+/// Paths that **cannot be hot-updated** if they change (e.g. fonts).
+///
+/// Same gitignore syntax as [flutterPatchIgnoreFileName], but opposite
+/// resource semantics: still inventoried and compared; a change aborts patch
+/// and requires a full release. Not packaged into the app.
+const String flutterPatchUnsupportedResourcesFileName = '.flutterpatch-unsupported-resources';
+
 /// Supported platform section headers in ignore files: `[android]` / `[ios]`.
 const Set<String> ignorePlatformSections = {'android', 'ios'};
 
-/// Project-level ignore rules for OTA snapshot / resource scanning and diff.
+/// Project-level path rules (gitignore subset) for OTA / resource flows.
 ///
-/// Syntax is a gitignore subset:
+/// Syntax:
 /// - blank lines and `#` comments are ignored
 /// - `*` matches within one path segment; `**` matches across segments
 /// - trailing `/` matches a directory prefix only
@@ -23,6 +32,9 @@ const Set<String> ignorePlatformSections = {'android', 'ios'};
 /// - `!pattern` negates a previous ignore (re-includes)
 /// - `[android]` / `[ios]` section headers: rules below apply only when that
 ///   platform is being checked (unscoped rules always apply)
+///
+/// Load with [FlutterPatchIgnore.load] (exclude from compare) or
+/// [FlutterPatchIgnore.loadUnsupported] (block hot-update when changed).
 class FlutterPatchIgnore {
   FlutterPatchIgnore._({
     required this.projectDir,
@@ -34,7 +46,7 @@ class FlutterPatchIgnore {
   /// Directory used as the search start (usually Flutter app dir).
   final String projectDir;
 
-  /// Absolute path of the loaded ignore file, or null if none existed.
+  /// Absolute path of the loaded rules file, or null if none existed.
   final String? filePath;
 
   /// Platform filter used when loading (`android` / `ios`), or null for all.
@@ -48,11 +60,37 @@ class FlutterPatchIgnore {
 
   /// Load `.flutterpatchignore` or legacy `.meta_otaignore`, walking up parents.
   ///
+  /// Matching paths are skipped in snapshot/asset inventory and diffs.
+  ///
   /// When [platform] is `android` or `ios`, only unscoped rules and that
   /// platform's section are kept. When null, all sections are included.
   factory FlutterPatchIgnore.load(String projectDir, {String? platform}) {
+    return FlutterPatchIgnore._loadFirst(
+      projectDir,
+      fileNames: const [flutterPatchIgnoreFileName, metaOtaIgnoreFileName],
+      platform: platform,
+    );
+  }
+
+  /// Load `.flutterpatch-unsupported-resources` (cannot hot-update if changed).
+  factory FlutterPatchIgnore.loadUnsupported(
+    String projectDir, {
+    String? platform,
+  }) {
+    return FlutterPatchIgnore._loadFirst(
+      projectDir,
+      fileNames: const [flutterPatchUnsupportedResourcesFileName],
+      platform: platform,
+    );
+  }
+
+  factory FlutterPatchIgnore._loadFirst(
+    String projectDir, {
+    required List<String> fileNames,
+    String? platform,
+  }) {
     final start = p.normalize(p.absolute(projectDir));
-    final found = _findIgnoreFile(start);
+    final found = _findNamedFile(start, fileNames);
     if (found == null) {
       return FlutterPatchIgnore._(
         projectDir: start,
@@ -69,10 +107,10 @@ class FlutterPatchIgnore {
     );
   }
 
-  static String? _findIgnoreFile(String startDir) {
+  static String? _findNamedFile(String startDir, List<String> fileNames) {
     var dir = Directory(startDir);
     for (var i = 0; i < 20; i++) {
-      for (final name in [flutterPatchIgnoreFileName, metaOtaIgnoreFileName]) {
+      for (final name in fileNames) {
         final candidate = File(p.join(dir.path, name));
         if (candidate.existsSync()) {
           return p.normalize(candidate.absolute.path);
@@ -85,7 +123,7 @@ class FlutterPatchIgnore {
     return null;
   }
 
-  /// Parse ignore file contents.
+  /// Parse ignore / unsupported file contents.
   factory FlutterPatchIgnore.parse(
     String contents, {
     String projectDir = '',
@@ -169,7 +207,7 @@ class FlutterPatchIgnore {
     return null;
   }
 
-  /// Whether [path] (posix, as stored in snapshot/resources) should be skipped.
+  /// Whether [path] (posix, as stored in snapshot/resources) matches a rule.
   bool isIgnored(String path) {
     if (_rules.isEmpty) return false;
     final normalized = path.replaceAll('\\', '/');
@@ -200,7 +238,7 @@ class FlutterPatchIgnore {
     return false;
   }
 
-  /// Whether a scanned asset (`package` + relative [path]) should be skipped.
+  /// Whether a scanned asset (`package` + relative [path]) matches these rules.
   bool isIgnoredAsset({required String package, required String path}) {
     final rel = path.replaceAll('\\', '/');
     if (isIgnored(rel)) return true;
