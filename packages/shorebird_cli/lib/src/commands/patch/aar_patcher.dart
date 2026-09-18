@@ -176,4 +176,18 @@ class AarPatcher extends Patcher {
       'Release version must be specified using --release-version.',
     );
   }
+
+  @override
+  Future<String?> resolvePackageBaselineHash() async {
+    final packageName = shorebirdEnv.androidPackageName;
+    if (packageName == null) return null;
+    final aar = File(
+      ShorebirdAndroidArtifacts.aarArtifactPath(
+        buildNumber: buildNumber,
+        packageName: packageName,
+      ),
+    );
+    if (!aar.existsSync()) return null;
+    return sha256.convert(await aar.readAsBytes()).toString();
+  }
 }

@@ -20,6 +20,9 @@ class ResourceUploadOptions {
     this.rescan = true,
     this.includeDev = false,
     this.platform,
+    this.origin = 'release',
+    this.patchNumber,
+    this.artifactHash,
   });
 
   final String appDir;
@@ -32,6 +35,9 @@ class ResourceUploadOptions {
   final bool rescan;
   final bool includeDev;
   final String? platform;
+  final String origin;
+  final int? patchNumber;
+  final String? artifactHash;
 }
 
 /// Scan (optional) then upload the version resource config to the control plane.
@@ -64,10 +70,30 @@ Future<Map<String, dynamic>> uploadReleaseResources(
       ? (decoded['resources'] as List).length
       : null;
 
+  // Hard-fail if embedded version does not match the upload target.
+  if (decoded is Map) {
+    final embedded = decoded['release_version']?.toString();
+    if (embedded != null &&
+        embedded.isNotEmpty &&
+        embedded != opts.releaseVersion) {
+      throw StateError(
+        'resource baseline release_version=$embedded, '
+        'expected ${opts.releaseVersion}',
+      );
+    }
+  }
+
   stdout.writeln('==> app_id: ${opts.appId}');
   stdout.writeln('==> release_version: ${opts.releaseVersion}');
   if (opts.platform != null) {
     stdout.writeln('==> platform: ${opts.platform}');
+  }
+  stdout.writeln('==> origin: ${opts.origin}');
+  if (opts.patchNumber != null) {
+    stdout.writeln('==> patch_number: ${opts.patchNumber}');
+  }
+  if (opts.artifactHash != null && opts.artifactHash!.isNotEmpty) {
+    stdout.writeln('==> artifact_hash: ${opts.artifactHash}');
   }
   stdout.writeln('==> config: $configFile (${bytes.length} bytes, hash=$hash)');
 
@@ -79,11 +105,15 @@ Future<Map<String, dynamic>> uploadReleaseResources(
     channel: opts.channel,
     notes: opts.notes,
     resourceCount: count,
+    origin: opts.origin,
+    patchNumber: opts.patchNumber,
+    artifactHash: opts.artifactHash,
   );
   stdout.writeln(const JsonEncoder.withIndent('  ').convert(created));
   stdout.writeln(
     '==> Uploaded resource snapshot #${created['number']} '
-    '(${created['resource_count'] ?? count ?? '?'} resources)',
+    '(${created['resource_count'] ?? count ?? '?'} resources, '
+    'origin=${created['origin'] ?? opts.origin})',
   );
   return created;
 }

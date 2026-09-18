@@ -185,5 +185,41 @@ void main() {
       verify(() => client.getOtaSnapshotContent('snap-1')).called(1);
       verify(() => client.getResourceSnapshotContent('res-1')).called(1);
     });
+
+    test('expectedArtifactHash mismatch throws', () async {
+      when(
+        () => client.listOtaSnapshots(
+          appId: appId,
+          releaseVersion: version,
+          platform: any(named: 'platform'),
+        ),
+      ).thenAnswer(
+        (_) async => [
+          {
+            'id': 'snap-1',
+            'number': 1,
+            'rolled_back': false,
+            'artifact_hash': 'aaa',
+          },
+        ],
+      );
+
+      expect(
+        () => fetchServerBaseline(
+          client: client,
+          appId: appId,
+          releaseVersion: version,
+          cache: cache,
+          expectedArtifactHash: 'bbb',
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('artifact_hash mismatch'),
+          ),
+        ),
+      );
+    });
   });
 }

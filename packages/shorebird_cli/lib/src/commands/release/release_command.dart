@@ -146,6 +146,19 @@ Use this when only the host app version changed (e.g. 1.0.0+1 → 1.0.0+2)
 and Dart/Flutter code is unchanged. Requires --release-version.
 Supported for aar and ios-framework only.''',
       )
+      ..addOption(
+        'artifact-hash',
+        help: '''
+With --from-release: require OTA baselines whose artifact_hash matches this
+sha256 (hard-fail on mismatch). Used by metax cache promote / by-hash clone.''',
+      )
+      ..addOption(
+        'source-patch-number',
+        help: '''
+With --from-release: clone OTA baselines that originated from this patch
+number (origin=patch), then register them as release baselines on the new
+version.''',
+      )
       ..addMultiOption(
         'target-platform',
         help: 'The target platform(s) for which the app is compiled.',
@@ -279,6 +292,20 @@ Supported for aar and ios-framework only.''',
 
   /// Existing release version to clone artifacts from, if provided.
   String? get fromReleaseVersion => results['from-release'] as String?;
+
+  /// Optional full-binary hash used to resolve OTA baselines when cloning.
+  String? get artifactHash {
+    final raw = results['artifact-hash'] as String?;
+    final trimmed = raw?.trim();
+    return (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+  }
+
+  /// Optional patch number whose full baselines should be cloned.
+  int? get sourcePatchNumber {
+    final raw = results['source-patch-number'] as String?;
+    if (raw == null || raw.trim().isEmpty) return null;
+    return int.tryParse(raw.trim());
+  }
 
   /// The build name specified via `--build-name`.
   String? get buildName =>
@@ -428,6 +455,7 @@ Supported for aar and ios-framework only.''',
             appId: appId,
             releaseVersion: release.version,
             platform: releaser.releaseType.releasePlatform.name,
+            releaseId: release.id,
           );
         }
 
@@ -544,6 +572,8 @@ Reuse your existing local ${lightCyan.wrap('release/')} artifacts in the host ap
           sourceReleaseVersion: fromReleaseVersion,
           targetReleaseVersion: releaseVersion,
           platform: releasePlatform.name,
+          artifactHash: artifactHash,
+          sourcePatchNumber: sourcePatchNumber,
         );
         await finalizeRelease(release: release, releaser: releaser);
 
@@ -592,10 +622,27 @@ Reuse your existing local ${lightCyan.wrap('release/')} artifacts in the host ap
         );
         throw ProcessExit(ExitCode.usage.code);
       }
+      if (results.wasParsed('artifact-hash') && artifactHash == null) {
+        logger.err('--artifact-hash must be a non-empty sha256.');
+        throw ProcessExit(ExitCode.usage.code);
+      }
+      if (results.wasParsed('source-patch-number') &&
+          sourcePatchNumber == null) {
+        logger.err('--source-patch-number must be an integer.');
+        throw ProcessExit(ExitCode.usage.code);
+      }
       // Skip Flutter-version minimum checks; the source release already
       // validated the Flutter pin used for these artifacts.
       await releaser.assertArgsAreValid();
       return;
+    }
+
+    if (results.wasParsed('artifact-hash') ||
+        results.wasParsed('source-patch-number')) {
+      logger.err(
+        '--artifact-hash / --source-patch-number require --from-release.',
+      );
+      throw ProcessExit(ExitCode.usage.code);
     }
 
     final shorebirdYaml = shorebirdEnv.getShorebirdYaml();
@@ -857,11 +904,20 @@ ${summary.join('\n')}
     required String appId,
     required String releaseVersion,
     required String platform,
+    int? releaseId,
   }) async {
     final dirs = resolveProjectDirs(yaml: shorebirdEnv.getShorebirdYaml());
     final progress = logger.progress('Uploading OTA baselines');
     try {
       final client = codePushClientWrapper.codePushClient;
+      String? artifactHash;
+      if (releaseId != null) {
+        artifactHash = await _primaryReleaseArtifactHash(
+          appId: appId,
+          releaseId: releaseId,
+          platform: platform,
+        );
+      }
       await uploadReleaseSnapshot(
         SnapshotUploadOptions(
           flutterDir: dirs.flutter,
@@ -871,6 +927,8 @@ ${summary.join('\n')}
           client: client,
           appId: appId,
           platform: platform,
+          origin: 'release',
+          artifactHash: artifactHash,
         ),
       );
       await uploadReleaseResources(
@@ -880,6 +938,8 @@ ${summary.join('\n')}
           client: client,
           appId: appId,
           platform: platform,
+          origin: 'release',
+          artifactHash: artifactHash,
         ),
       );
       progress.complete('Uploaded OTA snapshot + resource baselines');
@@ -891,6 +951,54 @@ Release succeeded; re-run:
   flutterpatch upload-snapshot --version $releaseVersion --platform $platform
   flutterpatch upload-resources --version $releaseVersion --platform $platform''',
       );
+    }
+  }
+
+  /// Picks a stable release artifact hash for baseline provenance.
+  ///
+  /// Prefers package-level archives (`aar` / `xcframework`) so the hash aligns
+  /// with metax cache `contentHash` for host-app promote flows; falls back to
+  /// the primary architecture blob.
+  Future<String?> _primaryReleaseArtifactHash({
+    required String appId,
+    required int releaseId,
+    required String platform,
+  }) async {
+    try {
+      final artifacts = await codePushClientWrapper.codePushClient
+          .getReleaseArtifacts(
+        appId: appId,
+        releaseId: releaseId,
+      );
+      if (artifacts.isEmpty) return null;
+      final preferredArches = <String>[
+        // Package-level first (aar / ios-framework promote).
+        'aar',
+        'xcframework',
+        ...switch (platform) {
+          'android' => ['aarch64'],
+          'ios' || 'ios-framework' => ['aarch64'],
+          'windows' => [primaryWindowsReleaseArtifactArch],
+          'linux' => [primaryLinuxReleaseArtifactArch],
+          'macos' => ['aarch64'],
+          _ => <String>[],
+        },
+      ];
+      ReleaseArtifact? match;
+      for (final arch in preferredArches) {
+        for (final artifact in artifacts) {
+          if (artifact.arch == arch) {
+            match = artifact;
+            break;
+          }
+        }
+        if (match != null) break;
+      }
+      final hash = (match ?? artifacts.first).hash.trim();
+      return hash.isEmpty ? null : hash;
+    } on Exception catch (error) {
+      logger.detail('Could not resolve release artifact hash: $error');
+      return null;
     }
   }
 

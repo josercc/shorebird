@@ -22,6 +22,9 @@ class SnapshotUploadOptions {
     this.rescan = true,
     this.includeDev = false,
     this.platform,
+    this.origin = 'release',
+    this.patchNumber,
+    this.artifactHash,
   });
 
   final String flutterDir;
@@ -36,6 +39,9 @@ class SnapshotUploadOptions {
   final bool rescan;
   final bool includeDev;
   final String? platform;
+  final String origin;
+  final int? patchNumber;
+  final String? artifactHash;
 }
 
 /// Scan (optional) then upload the version OTA snapshot to the control plane.
@@ -77,6 +83,13 @@ Future<Map<String, dynamic>> uploadReleaseSnapshot(
   if (opts.platform != null) {
     stdout.writeln('==> platform: ${opts.platform}');
   }
+  stdout.writeln('==> origin: ${opts.origin}');
+  if (opts.patchNumber != null) {
+    stdout.writeln('==> patch_number: ${opts.patchNumber}');
+  }
+  if (opts.artifactHash != null && opts.artifactHash!.isNotEmpty) {
+    stdout.writeln('==> artifact_hash: ${opts.artifactHash}');
+  }
   stdout.writeln(
     '==> snapshot: $snapshotFile (${bytes.length} bytes, hash=$hash)',
   );
@@ -89,11 +102,15 @@ Future<Map<String, dynamic>> uploadReleaseSnapshot(
     channel: opts.channel,
     notes: opts.notes,
     fileCount: fileCount,
+    origin: opts.origin,
+    patchNumber: opts.patchNumber,
+    artifactHash: opts.artifactHash,
   );
   stdout.writeln(const JsonEncoder.withIndent('  ').convert(created));
   stdout.writeln(
     '==> Uploaded OTA snapshot #${created['number']} '
-    '(${created['file_count'] ?? fileCount ?? '?'} files)',
+    '(${created['file_count'] ?? fileCount ?? '?'} files, '
+    'origin=${created['origin'] ?? opts.origin})',
   );
   return created;
 }

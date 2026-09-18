@@ -432,6 +432,10 @@ class CodePushClient {
   // ---------------------------------------------------------------------------
 
   /// Uploads a version resource snapshot (`POST /admin/v1/resources`).
+  ///
+  /// [origin] is `release` (default) or `patch`. When `patch`, [patchNumber]
+  /// is required. [artifactHash] is the full binary sha256 used for by-hash
+  /// lookup (not the JSON content hash).
   Future<Map<String, dynamic>> uploadResourceSnapshot({
     required String appId,
     required String releaseVersion,
@@ -440,6 +444,9 @@ class CodePushClient {
     String channel = 'stable',
     String? notes,
     int? resourceCount,
+    String origin = 'release',
+    int? patchNumber,
+    String? artifactHash,
   }) async {
     final hash = sha256.convert(contentBytes).toString();
     final response = await _httpClient.post(
@@ -451,9 +458,13 @@ class CodePushClient {
         'channel': channel,
         'content_base64': base64Encode(contentBytes),
         'hash': hash,
+        'origin': origin,
         if (platform != null && platform.isNotEmpty) 'platform': platform,
         if (resourceCount != null) 'resource_count': resourceCount,
         if (notes != null && notes.isNotEmpty) 'notes': notes,
+        if (patchNumber != null) 'patch_number': patchNumber,
+        if (artifactHash != null && artifactHash.isNotEmpty)
+          'artifact_hash': artifactHash,
       }),
     );
     if (!response.isSuccess) _throw(response);
@@ -470,6 +481,10 @@ class CodePushClient {
           'version': releaseVersion,
           if (platform != null && platform.isNotEmpty) 'platform': platform,
           'number': created['number'],
+          'origin': origin,
+          if (patchNumber != null) 'patch_number': patchNumber,
+          if (artifactHash != null && artifactHash.isNotEmpty)
+            'artifact_hash': artifactHash,
         },
       );
     }
@@ -480,6 +495,7 @@ class CodePushClient {
     required String appId,
     String? releaseVersion,
     String? platform,
+    String? artifactHash,
   }) async {
     final response = await _httpClient.get(
       Uri.parse('$_admin/resources').replace(
@@ -487,6 +503,8 @@ class CodePushClient {
           'app_id': appId,
           if (releaseVersion != null) 'release_version': releaseVersion,
           if (platform != null && platform.isNotEmpty) 'platform': platform,
+          if (artifactHash != null && artifactHash.isNotEmpty)
+            'artifact_hash': artifactHash,
         },
       ),
     );
@@ -523,6 +541,8 @@ class CodePushClient {
   }
 
   /// Uploads an OTA eligibility snapshot (`POST /admin/v1/snapshots`).
+  ///
+  /// See [uploadResourceSnapshot] for [origin] / [patchNumber] / [artifactHash].
   Future<Map<String, dynamic>> uploadOtaSnapshot({
     required String appId,
     required String releaseVersion,
@@ -531,6 +551,9 @@ class CodePushClient {
     String channel = 'stable',
     String? notes,
     int? fileCount,
+    String origin = 'release',
+    int? patchNumber,
+    String? artifactHash,
   }) async {
     final hash = sha256.convert(contentBytes).toString();
     final response = await _httpClient.post(
@@ -542,9 +565,13 @@ class CodePushClient {
         'channel': channel,
         'content_base64': base64Encode(contentBytes),
         'hash': hash,
+        'origin': origin,
         if (platform != null && platform.isNotEmpty) 'platform': platform,
         if (fileCount != null) 'file_count': fileCount,
         if (notes != null && notes.isNotEmpty) 'notes': notes,
+        if (patchNumber != null) 'patch_number': patchNumber,
+        if (artifactHash != null && artifactHash.isNotEmpty)
+          'artifact_hash': artifactHash,
       }),
     );
     if (!response.isSuccess) _throw(response);
@@ -561,6 +588,10 @@ class CodePushClient {
           'version': releaseVersion,
           if (platform != null && platform.isNotEmpty) 'platform': platform,
           'number': created['number'],
+          'origin': origin,
+          if (patchNumber != null) 'patch_number': patchNumber,
+          if (artifactHash != null && artifactHash.isNotEmpty)
+            'artifact_hash': artifactHash,
         },
       );
     }
@@ -572,6 +603,7 @@ class CodePushClient {
     required String appId,
     String? releaseVersion,
     String? platform,
+    String? artifactHash,
   }) async {
     final response = await _httpClient.get(
       Uri.parse('$_admin/snapshots').replace(
@@ -579,6 +611,8 @@ class CodePushClient {
           'app_id': appId,
           if (releaseVersion != null) 'release_version': releaseVersion,
           if (platform != null && platform.isNotEmpty) 'platform': platform,
+          if (artifactHash != null && artifactHash.isNotEmpty)
+            'artifact_hash': artifactHash,
         },
       ),
     );
@@ -612,6 +646,30 @@ class CodePushClient {
       },
     );
     return bytes;
+  }
+
+  /// Looks up resource + snapshot baselines by full binary [artifactHash].
+  ///
+  /// Returns `null` when the control plane responds 404.
+  Future<Map<String, dynamic>?> lookupBaselinesByArtifactHash({
+    required String artifactHash,
+    String? appId,
+  }) async {
+    final hash = artifactHash.trim();
+    if (hash.isEmpty) {
+      throw ArgumentError.value(artifactHash, 'artifactHash', 'must be non-empty');
+    }
+    final response = await _httpClient.get(
+      Uri.parse('$_admin/baselines/by-artifact-hash').replace(
+        queryParameters: {
+          'hash': hash,
+          if (appId != null && appId.isNotEmpty) 'app_id': appId,
+        },
+      ),
+    );
+    if (response.statusCode == HttpStatus.notFound) return null;
+    if (!response.isSuccess) _throw(response);
+    return _json(response);
   }
 
   /// Looks up a content-addressed asset by sha256. Returns null on 404.

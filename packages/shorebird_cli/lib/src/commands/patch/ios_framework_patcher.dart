@@ -244,4 +244,23 @@ class IosFrameworkPatcher extends Patcher with ApplePatcherMixin {
       'Release version must be specified using --release-version.',
     );
   }
+
+  @override
+  Future<String?> resolvePackageBaselineHash() async {
+    final xcframework = Directory(
+      p.join(
+        artifactManager.getAppXcframeworkDirectory().path,
+        ArtifactManager.appXcframeworkName,
+      ),
+    );
+    if (!xcframework.existsSync()) return null;
+    final zipped = await xcframework.zipToTempFile();
+    try {
+      return sha256.convert(await zipped.readAsBytes()).toString();
+    } finally {
+      if (zipped.existsSync()) {
+        zipped.deleteSync();
+      }
+    }
+  }
 }

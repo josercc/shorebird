@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:shorebird_cli/src/ota/check_ota.dart';
 import 'package:shorebird_cli/src/ota/scan_assets.dart';
@@ -74,6 +75,9 @@ class BaselineContentCache {
 /// When [cache] is set, content bodies are read/written under that cache keyed
 /// by snapshot/resource id. List APIs always run so the latest active id is
 /// used. Pass [forceRefresh] to ignore cached bodies and re-download.
+///
+/// When [expectedArtifactHash] is set, the selected baseline rows must carry
+/// the same `artifact_hash` or this throws [StateError].
 Future<ServerBaseline> fetchServerBaseline({
   required CodePushClient client,
   required String appId,
@@ -81,6 +85,7 @@ Future<ServerBaseline> fetchServerBaseline({
   String? platform,
   BaselineContentCache? cache,
   bool forceRefresh = false,
+  String? expectedArtifactHash,
 }) async {
   OtaSnapshot? snapshot;
   Map<String, dynamic>? snapshotMeta;
@@ -103,6 +108,12 @@ Future<ServerBaseline> fetchServerBaseline({
 
   if (activeSnaps.isNotEmpty) {
     snapshotMeta = activeSnaps.first;
+    _assertBaselineArtifactHash(
+      meta: snapshotMeta,
+      expectedArtifactHash: expectedArtifactHash,
+      kind: 'snapshot',
+      releaseVersion: releaseVersion,
+    );
     final id = snapshotMeta['id'] as String;
     final bytes = await _loadContentBytes(
       kind: 'snapshot',
@@ -114,6 +125,11 @@ Future<ServerBaseline> fetchServerBaseline({
           ? null
           : (b) => cache.writeSnapshot(id, b),
       readCache: cache == null ? null : () => cache.readSnapshot(id),
+    );
+    _assertBaselineContentHash(
+      meta: snapshotMeta,
+      bytes: bytes,
+      kind: 'snapshot',
     );
     final decoded = jsonDecode(utf8.decode(bytes));
     if (decoded is! Map) {
@@ -138,6 +154,12 @@ Future<ServerBaseline> fetchServerBaseline({
 
   if (activeRes.isNotEmpty) {
     resourceMeta = activeRes.first;
+    _assertBaselineArtifactHash(
+      meta: resourceMeta,
+      expectedArtifactHash: expectedArtifactHash,
+      kind: 'resource',
+      releaseVersion: releaseVersion,
+    );
     final id = resourceMeta['id'] as String;
     final bytes = await _loadContentBytes(
       kind: 'resource',
@@ -150,8 +172,22 @@ Future<ServerBaseline> fetchServerBaseline({
           : (b) => cache.writeResource(id, b),
       readCache: cache == null ? null : () => cache.readResource(id),
     );
+    _assertBaselineContentHash(
+      meta: resourceMeta,
+      bytes: bytes,
+      kind: 'resource',
+    );
     final decoded = jsonDecode(utf8.decode(bytes));
     if (decoded is Map) {
+      final embeddedVersion = decoded['release_version']?.toString();
+      if (embeddedVersion != null &&
+          embeddedVersion.isNotEmpty &&
+          embeddedVersion != releaseVersion) {
+        throw StateError(
+          'resource baseline embedded release_version=$embeddedVersion, '
+          'expected $releaseVersion',
+        );
+      }
       final list = decoded['resources'];
       if (list is List) {
         resourceAssets = list.map((e) {
@@ -182,6 +218,44 @@ Future<ServerBaseline> fetchServerBaseline({
     resourceAssets: resourceAssets,
     resourceMeta: resourceMeta,
   );
+}
+
+void _assertBaselineArtifactHash({
+  required Map<String, dynamic> meta,
+  required String? expectedArtifactHash,
+  required String kind,
+  required String releaseVersion,
+}) {
+  final expected = expectedArtifactHash?.trim().toLowerCase();
+  if (expected == null || expected.isEmpty) return;
+  final actual = '${meta['artifact_hash'] ?? ''}'.trim().toLowerCase();
+  if (actual.isEmpty) {
+    throw StateError(
+      'baseline $kind for $releaseVersion has no artifact_hash; '
+      'expected $expected',
+    );
+  }
+  if (actual != expected) {
+    throw StateError(
+      'baseline $kind artifact_hash mismatch for $releaseVersion: '
+      'got $actual, expected $expected',
+    );
+  }
+}
+
+void _assertBaselineContentHash({
+  required Map<String, dynamic> meta,
+  required List<int> bytes,
+  required String kind,
+}) {
+  final expected = '${meta['hash'] ?? ''}'.trim().toLowerCase();
+  if (expected.isEmpty) return;
+  final actual = sha256.convert(bytes).toString();
+  if (actual != expected) {
+    throw StateError(
+      'baseline $kind content hash mismatch: got $actual, expected $expected',
+    );
+  }
 }
 
 Future<List<int>> _loadContentBytes({

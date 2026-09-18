@@ -225,7 +225,7 @@ More info: ${troubleshootingUrl.toLink()}.
       );
     }
 
-    await codePushClientWrapper.publishPatch(
+    final patchNumber = await codePushClientWrapper.publishPatch(
       appId: appId,
       releaseId: releaseId,
       metadata: metadata,
@@ -238,7 +238,91 @@ More info: ${troubleshootingUrl.toLink()}.
       whitelistEnabled: configureWhitelist ? _whitelistEnabled : null,
       uniqueIds: configureWhitelist ? _uniqueIds : null,
     );
+
+    if (_shouldUploadPatchBaselines &&
+        releaseVersion != null &&
+        releaseVersion.isNotEmpty) {
+      await _uploadPatchBaselines(
+        appId: appId,
+        releaseVersion: releaseVersion,
+        patchNumber: patchNumber,
+        artifacts: artifacts,
+      );
+    }
   }
+
+  bool get _shouldUploadPatchBaselines {
+    final yaml = shorebirdEnv.getShorebirdYaml();
+    return (yaml?.uploadBaselines ?? false) ||
+        (yaml?.uploadPatchResources ?? false);
+  }
+
+  /// Uploads full snapshot + resource baselines tagged as patch provenance.
+  Future<void> _uploadPatchBaselines({
+    required String appId,
+    required String releaseVersion,
+    required int patchNumber,
+    required Map<Arch, PatchArtifactBundle> artifacts,
+  }) async {
+    final platform = releaseType.releasePlatform.name;
+    final dirs = resolveProjectDirs(yaml: shorebirdEnv.getShorebirdYaml());
+    final artifactHash =
+        await resolvePackageBaselineHash() ??
+        _primaryPatchArtifactHash(artifacts);
+    final progress = logger.progress(
+      'Uploading patch #$patchNumber OTA baselines',
+    );
+    try {
+      final client = codePushClientWrapper.codePushClient;
+      await uploadReleaseSnapshot(
+        SnapshotUploadOptions(
+          flutterDir: dirs.flutter,
+          androidDir: dirs.android,
+          iosDir: dirs.ios,
+          releaseVersion: releaseVersion,
+          client: client,
+          appId: appId,
+          platform: platform,
+          origin: 'patch',
+          patchNumber: patchNumber,
+          artifactHash: artifactHash,
+          notes: 'Patch #$patchNumber full baseline',
+        ),
+      );
+      await uploadReleaseResources(
+        ResourceUploadOptions(
+          appDir: dirs.flutter,
+          releaseVersion: releaseVersion,
+          client: client,
+          appId: appId,
+          platform: platform,
+          origin: 'patch',
+          patchNumber: patchNumber,
+          artifactHash: artifactHash,
+          notes: 'Patch #$patchNumber full baseline',
+        ),
+      );
+      progress.complete(
+        'Uploaded patch #$patchNumber snapshot + resource baselines',
+      );
+    } on Exception catch (error) {
+      progress.fail('Failed to upload patch baselines: $error');
+      throw ProcessExit(ExitCode.software.code);
+    }
+  }
+
+  String? _primaryPatchArtifactHash(Map<Arch, PatchArtifactBundle> artifacts) {
+    if (artifacts.isEmpty) return null;
+    final preferred = artifacts[Arch.arm64] ?? artifacts.values.first;
+    final hash = preferred.hash.trim();
+    return hash.isEmpty ? null : hash;
+  }
+
+  /// Package-level archive hash (aar / xcframework) for baseline provenance.
+  ///
+  /// Aligns with metax cache `contentHash` for host-app promote flows. Default
+  /// is null; aar / ios-framework patchers override.
+  Future<String?> resolvePackageBaselineHash() async => null;
 
   bool get _forceDuplicateResources =>
       argResults.options.contains('force-duplicate-resources') &&

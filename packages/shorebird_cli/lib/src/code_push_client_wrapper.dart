@@ -1032,16 +1032,20 @@ ${sourceArtifact.arch} artifact already exists, continuing...''');
   /// baselines as the Flutter artifacts they reuse. Content-addressed asset
   /// blobs are shared by hash and do not need re-uploading.
   ///
-  /// Soft-fails (logs a warning) when the source has no baselines or when
-  /// upload fails, so a missing OTA baseline does not undo a successful
-  /// artifact clone.
+  /// When [artifactHash] or [sourcePatchNumber] is set, resolution and upload
+  /// hard-fail on mismatch (no soft-warn). Legacy calls without those args
+  /// still soft-fail so a missing OTA baseline does not undo artifact clone.
   // flutterpatch: ownership=FORK — from meta_ota
   Future<void> cloneReleaseBaselines({
     required String appId,
     required String sourceReleaseVersion,
     required String targetReleaseVersion,
     required String platform,
+    String? artifactHash,
+    int? sourcePatchNumber,
   }) async {
+    final strict = (artifactHash != null && artifactHash.trim().isNotEmpty) ||
+        sourcePatchNumber != null;
     final progress = logger.progress('Cloning OTA baselines');
     try {
       var clonedSnapshot = false;
@@ -1051,25 +1055,48 @@ ${sourceArtifact.arch} artifact already exists, continuing...''');
         appId: appId,
         releaseVersion: sourceReleaseVersion,
         platform: platform,
+        artifactHash: artifactHash,
       );
-      final activeSnapshot = _latestActiveBaseline(snapshots);
+      final activeSnapshot = _resolveSourceBaseline(
+        snapshots,
+        artifactHash: artifactHash,
+        sourcePatchNumber: sourcePatchNumber,
+        kind: 'snapshot',
+      );
       if (activeSnapshot != null) {
         final id = activeSnapshot['id'] as String;
         final bytes = await codePushClient.getOtaSnapshotContent(id);
+        _assertClonedBaseline(
+          meta: activeSnapshot,
+          bytes: bytes,
+          expectedVersion: sourceReleaseVersion,
+          expectedArtifactHash: artifactHash,
+          expectedPatchNumber: sourcePatchNumber,
+          kind: 'snapshot',
+        );
         final decoded = jsonDecode(utf8.decode(bytes));
         final fileCount = decoded is Map && decoded['files'] is List
             ? (decoded['files'] as List).length
             : (activeSnapshot['file_count'] as num?)?.toInt();
         final channel =
             activeSnapshot['channel'] as String? ?? 'stable';
+        final sourceOrigin = '${activeSnapshot['origin'] ?? 'release'}';
+        final sourcePatch =
+            (activeSnapshot['patch_number'] as num?)?.toInt();
+        final notes = sourceOrigin == 'patch' && sourcePatch != null
+            ? 'Cloned from $sourceReleaseVersion (patch #$sourcePatch)'
+            : 'Cloned from $sourceReleaseVersion';
         await codePushClient.uploadOtaSnapshot(
           appId: appId,
           releaseVersion: targetReleaseVersion,
           contentBytes: bytes,
           platform: platform,
           channel: channel,
-          notes: 'Cloned from $sourceReleaseVersion',
+          notes: notes,
           fileCount: fileCount,
+          origin: 'release',
+          artifactHash: artifactHash ??
+              activeSnapshot['artifact_hash'] as String?,
         );
         clonedSnapshot = true;
         logger.detail(
@@ -1082,12 +1109,26 @@ ${sourceArtifact.arch} artifact already exists, continuing...''');
         appId: appId,
         releaseVersion: sourceReleaseVersion,
         platform: platform,
+        artifactHash: artifactHash,
       );
-      final activeResource = _latestActiveBaseline(resources);
+      final activeResource = _resolveSourceBaseline(
+        resources,
+        artifactHash: artifactHash,
+        sourcePatchNumber: sourcePatchNumber,
+        kind: 'resource',
+      );
       if (activeResource != null) {
         final id = activeResource['id'] as String;
         final sourceBytes = await codePushClient.getResourceSnapshotContent(
           id,
+        );
+        _assertClonedBaseline(
+          meta: activeResource,
+          bytes: sourceBytes,
+          expectedVersion: sourceReleaseVersion,
+          expectedArtifactHash: artifactHash,
+          expectedPatchNumber: sourcePatchNumber,
+          kind: 'resource',
         );
         final contentBytes = _rewriteResourceReleaseVersion(
           sourceBytes,
@@ -1099,14 +1140,23 @@ ${sourceArtifact.arch} artifact already exists, continuing...''');
             : (activeResource['resource_count'] as num?)?.toInt();
         final channel =
             activeResource['channel'] as String? ?? 'stable';
+        final sourceOrigin = '${activeResource['origin'] ?? 'release'}';
+        final sourcePatch =
+            (activeResource['patch_number'] as num?)?.toInt();
+        final notes = sourceOrigin == 'patch' && sourcePatch != null
+            ? 'Cloned from $sourceReleaseVersion (patch #$sourcePatch)'
+            : 'Cloned from $sourceReleaseVersion';
         await codePushClient.uploadResourceSnapshot(
           appId: appId,
           releaseVersion: targetReleaseVersion,
           contentBytes: contentBytes,
           platform: platform,
           channel: channel,
-          notes: 'Cloned from $sourceReleaseVersion',
+          notes: notes,
           resourceCount: resourceCount,
+          origin: 'release',
+          artifactHash: artifactHash ??
+              activeResource['artifact_hash'] as String?,
         );
         clonedResources = true;
         logger.detail(
@@ -1116,6 +1166,15 @@ ${sourceArtifact.arch} artifact already exists, continuing...''');
       }
 
       if (!clonedSnapshot && !clonedResources) {
+        if (strict) {
+          progress.fail(
+            'No OTA baselines matched artifact_hash/patch for '
+            '$sourceReleaseVersion',
+          );
+          throw StateError(
+            'No matching OTA baselines for clone from $sourceReleaseVersion',
+          );
+        }
         progress.complete(
           'No OTA baselines on source release $sourceReleaseVersion',
         );
@@ -1134,8 +1193,11 @@ After cloning you can still upload baselines with:
         if (clonedResources) 'resource config',
       ];
       progress.complete('Cloned OTA ${parts.join(' + ')}');
-    } on Exception catch (error) {
+    } catch (error) {
       progress.fail('Failed to clone OTA baselines: $error');
+      if (strict) {
+        throw ProcessExit(ExitCode.software.code);
+      }
       logger.info(
         '''
 Release artifacts were cloned; re-run baselines manually:
@@ -1145,19 +1207,99 @@ Release artifacts were cloned; re-run baselines manually:
     }
   }
 
-  /// Newest non-rolled-back baseline row, or null if none.
-  Map<String, dynamic>? _latestActiveBaseline(
-    List<Map<String, dynamic>> rows,
-  ) {
-    final active = rows
-        .where((e) => e['rolled_back'] != true && e['rolled_back'] != 1)
-        .toList()
+  /// Newest non-rolled-back baseline row matching optional provenance filters.
+  Map<String, dynamic>? _resolveSourceBaseline(
+    List<Map<String, dynamic>> rows, {
+    String? artifactHash,
+    int? sourcePatchNumber,
+    required String kind,
+  }) {
+    final expectedHash = artifactHash?.trim().toLowerCase();
+    final filtered = rows.where((e) {
+      if (e['rolled_back'] == true || e['rolled_back'] == 1) return false;
+      if (expectedHash != null && expectedHash.isNotEmpty) {
+        final actual = '${e['artifact_hash'] ?? ''}'.trim().toLowerCase();
+        if (actual != expectedHash) return false;
+      }
+      if (sourcePatchNumber != null) {
+        final origin = '${e['origin'] ?? ''}'.trim().toLowerCase();
+        final patch = (e['patch_number'] as num?)?.toInt();
+        if (origin != 'patch' || patch != sourcePatchNumber) return false;
+      }
+      return true;
+    }).toList()
       ..sort(
         (a, b) => ((b['number'] as num?)?.toInt() ?? 0).compareTo(
           (a['number'] as num?)?.toInt() ?? 0,
         ),
       );
-    return active.firstOrNull;
+    if (filtered.isEmpty &&
+        (expectedHash != null && expectedHash.isNotEmpty ||
+            sourcePatchNumber != null)) {
+      throw StateError(
+        'No $kind baseline matched artifact_hash='
+        '${artifactHash ?? "(any)"} patch=${sourcePatchNumber ?? "(any)"}',
+      );
+    }
+    return filtered.firstOrNull;
+  }
+
+  void _assertClonedBaseline({
+    required Map<String, dynamic> meta,
+    required List<int> bytes,
+    required String expectedVersion,
+    required String? expectedArtifactHash,
+    required int? expectedPatchNumber,
+    required String kind,
+  }) {
+    final metaVersion = '${meta['release_version'] ?? ''}';
+    if (metaVersion.isNotEmpty && metaVersion != expectedVersion) {
+      throw StateError(
+        'baseline $kind release_version=$metaVersion, '
+        'expected $expectedVersion',
+      );
+    }
+    final contentHash = '${meta['hash'] ?? ''}'.trim().toLowerCase();
+    if (contentHash.isNotEmpty) {
+      final actual = sha256.convert(bytes).toString();
+      if (actual != contentHash) {
+        throw StateError(
+          'baseline $kind content hash mismatch: got $actual, '
+          'expected $contentHash',
+        );
+      }
+    }
+    final expected = expectedArtifactHash?.trim().toLowerCase();
+    if (expected != null && expected.isNotEmpty) {
+      final actual = '${meta['artifact_hash'] ?? ''}'.trim().toLowerCase();
+      if (actual != expected) {
+        throw StateError(
+          'baseline $kind artifact_hash mismatch: got $actual, '
+          'expected $expected',
+        );
+      }
+    }
+    if (expectedPatchNumber != null) {
+      final origin = '${meta['origin'] ?? ''}'.trim().toLowerCase();
+      final patch = (meta['patch_number'] as num?)?.toInt();
+      if (origin != 'patch' || patch != expectedPatchNumber) {
+        throw StateError(
+          'baseline $kind expected patch #$expectedPatchNumber, '
+          'got origin=$origin patch=$patch',
+        );
+      }
+    } else if (expectedArtifactHash != null &&
+        expectedArtifactHash.trim().isNotEmpty) {
+      // By-hash release promote: require origin=release (or legacy unset).
+      final origin = '${meta['origin'] ?? 'release'}'.trim().toLowerCase();
+      if (origin != 'release') {
+        throw StateError(
+          'baseline $kind artifact_hash matched but origin=$origin '
+          '(expected release); pass --source-patch-number for patched '
+          'baselines',
+        );
+      }
+    }
   }
 
   /// Rewrites `release_version` inside a resource snapshot JSON payload.
@@ -1397,7 +1539,7 @@ Release artifacts were cloned; re-run baselines manually:
   /// Publishes a patch to the Shorebird server. This consists of creating a
   /// patch, uploading patch artifacts, and promoting the patch to a specific
   /// channel based on the provided [track].
-  Future<void> publishPatch({
+  Future<int> publishPatch({
     required String appId,
     required int releaseId,
     required Json metadata,
@@ -1436,6 +1578,7 @@ Release artifacts were cloned; re-run baselines manually:
 
     final number = codePushClient.patchNumberFor(patch.id) ?? patch.number;
     logger.success('\n✅ Published Patch $number!');
+    return number;
   }
 
   /// Returns a GCP download link for measuring download speed.

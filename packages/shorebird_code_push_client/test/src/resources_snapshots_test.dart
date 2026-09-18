@@ -35,9 +35,14 @@ void main() {
 
     test('uploadResourceSnapshot posts to /admin/v1/resources', () async {
       when(() => httpClient.send(any())).thenAnswer((invocation) async {
-        final request = invocation.positionalArguments.first as http.BaseRequest;
+        final request =
+            invocation.positionalArguments.first as http.Request;
         expect(request.url.path, '/admin/v1/resources');
         expect(request.method, 'POST');
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['origin'], 'patch');
+        expect(body['patch_number'], 3);
+        expect(body['artifact_hash'], 'abc123');
         return http.StreamedResponse(
           Stream.value(
             utf8.encode(
@@ -45,6 +50,9 @@ void main() {
                 'id': 'res-1',
                 'number': 1,
                 'resource_count': 2,
+                'origin': 'patch',
+                'patch_number': 3,
+                'artifact_hash': 'abc123',
               }),
             ),
           ),
@@ -57,9 +65,13 @@ void main() {
         releaseVersion: version,
         contentBytes: utf8.encode('{"resources":[]}'),
         platform: 'android',
+        origin: 'patch',
+        patchNumber: 3,
+        artifactHash: 'abc123',
       );
       expect(result['id'], 'res-1');
       expect(result['number'], 1);
+      expect(result['origin'], 'patch');
     });
 
     test('uploadOtaSnapshot posts to /admin/v1/snapshots', () async {
@@ -81,6 +93,46 @@ void main() {
         platform: 'ios',
       );
       expect(result['id'], 'snap-1');
+    });
+
+    test('lookupBaselinesByArtifactHash hits by-artifact-hash', () async {
+      when(() => httpClient.send(any())).thenAnswer((invocation) async {
+        final request = invocation.positionalArguments.first as http.BaseRequest;
+        expect(request.url.path, '/admin/v1/baselines/by-artifact-hash');
+        expect(request.url.queryParameters['hash'], 'deadbeef');
+        expect(request.url.queryParameters['app_id'], appId);
+        return http.StreamedResponse(
+          Stream.value(
+            utf8.encode(
+              jsonEncode({
+                'artifact_hash': 'deadbeef',
+                'resource': {
+                  'origin': 'release',
+                  'artifact_hash': 'deadbeef',
+                },
+                'snapshot': null,
+              }),
+            ),
+          ),
+          200,
+        );
+      });
+
+      final result = await client.lookupBaselinesByArtifactHash(
+        artifactHash: 'deadbeef',
+        appId: appId,
+      );
+      expect(result?['resource']['origin'], 'release');
+    });
+
+    test('lookupBaselinesByArtifactHash returns null on 404', () async {
+      when(() => httpClient.send(any())).thenAnswer(
+        (_) async => http.StreamedResponse(const Stream.empty(), 404),
+      );
+      expect(
+        await client.lookupBaselinesByArtifactHash(artifactHash: 'missing'),
+        isNull,
+      );
     });
 
     test('uploadContentAddressedAsset posts to /admin/v1/assets', () async {
