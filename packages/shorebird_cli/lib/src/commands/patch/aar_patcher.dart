@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:io/io.dart';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
+import 'package:shorebird_cli/src/archive/directory_archive.dart';
 import 'package:shorebird_cli/src/archive_analysis/android_archive_differ.dart';
 import 'package:shorebird_cli/src/artifact_builder/artifact_builder.dart';
 import 'package:shorebird_cli/src/artifact_manager.dart';
@@ -189,5 +190,48 @@ class AarPatcher extends Patcher {
     );
     if (!aar.existsSync()) return null;
     return sha256.convert(await aar.readAsBytes()).toString();
+  }
+
+  @override
+  Future<List<PatchPackageArtifact>> resolvePatchPackageArtifacts() async {
+    final packageName = shorebirdEnv.androidPackageName;
+    if (packageName == null) return const [];
+    final aar = File(
+      ShorebirdAndroidArtifacts.aarArtifactPath(
+        buildNumber: buildNumber,
+        packageName: packageName,
+      ),
+    );
+    if (!aar.existsSync()) return const [];
+
+    final hash = sha256.convert(await aar.readAsBytes()).toString();
+    final out = <PatchPackageArtifact>[
+      PatchPackageArtifact(
+        path: aar.path,
+        arch: primaryReleaseArtifactArch,
+        hash: hash,
+      ),
+    ];
+
+    final supplementDir = artifactManager.getReleaseSupplementDirectory(
+      platformSubdir: 'android',
+    );
+    if (supplementDir != null &&
+        supplementDir.existsSync() &&
+        supplementDir.listSync().isNotEmpty) {
+      final zippedSupplement = await supplementDir.zipToTempFile(
+        name: supplementaryReleaseArtifactArch,
+      );
+      out.add(
+        PatchPackageArtifact(
+          path: zippedSupplement.path,
+          arch: supplementaryReleaseArtifactArch!,
+          hash: sha256
+              .convert(await zippedSupplement.readAsBytes())
+              .toString(),
+        ),
+      );
+    }
+    return out;
   }
 }

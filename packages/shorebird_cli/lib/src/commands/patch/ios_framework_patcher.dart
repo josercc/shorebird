@@ -245,22 +245,65 @@ class IosFrameworkPatcher extends Patcher with ApplePatcherMixin {
     );
   }
 
-  @override
-  Future<String?> resolvePackageBaselineHash() async {
+  File? _cachedPackageZip;
+  String? _cachedPackageHash;
+
+  Future<void> _ensurePackageZip() async {
+    if (_cachedPackageZip != null &&
+        _cachedPackageZip!.existsSync() &&
+        _cachedPackageHash != null) {
+      return;
+    }
     final xcframework = Directory(
       p.join(
         artifactManager.getAppXcframeworkDirectory().path,
         ArtifactManager.appXcframeworkName,
       ),
     );
-    if (!xcframework.existsSync()) return null;
+    if (!xcframework.existsSync()) return;
     final zipped = await xcframework.zipToTempFile();
-    try {
-      return sha256.convert(await zipped.readAsBytes()).toString();
-    } finally {
-      if (zipped.existsSync()) {
-        zipped.deleteSync();
-      }
+    _cachedPackageZip = zipped;
+    _cachedPackageHash = sha256.convert(await zipped.readAsBytes()).toString();
+  }
+
+  @override
+  Future<String?> resolvePackageBaselineHash() async {
+    await _ensurePackageZip();
+    return _cachedPackageHash;
+  }
+
+  @override
+  Future<List<PatchPackageArtifact>> resolvePatchPackageArtifacts() async {
+    await _ensurePackageZip();
+    final zipped = _cachedPackageZip;
+    final hash = _cachedPackageHash;
+    if (zipped == null || hash == null || !zipped.existsSync()) {
+      return const [];
     }
+
+    final out = <PatchPackageArtifact>[
+      PatchPackageArtifact(
+        path: zipped.path,
+        arch: primaryReleaseArtifactArch,
+        hash: hash,
+      ),
+    ];
+
+    final supplementDir = shorebirdEnv.iosSupplementDirectory;
+    if (supplementDir.existsSync() && supplementDir.listSync().isNotEmpty) {
+      final zippedSupplement = await supplementDir.zipToTempFile(
+        name: supplementaryReleaseArtifactArch,
+      );
+      out.add(
+        PatchPackageArtifact(
+          path: zippedSupplement.path,
+          arch: supplementaryReleaseArtifactArch!,
+          hash: sha256
+              .convert(await zippedSupplement.readAsBytes())
+              .toString(),
+        ),
+      );
+    }
+    return out;
   }
 }

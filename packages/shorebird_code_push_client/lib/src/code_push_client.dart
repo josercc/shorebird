@@ -316,6 +316,11 @@ class CodePushClient {
   }
 
   /// Uploads a patch artifact to control_api (`POST /admin/v1/patches`).
+  ///
+  /// When [number] is set, the server stores the row under that patch number
+  /// (used to correlate full-package arches with the code-diff patch).
+  /// Set [attachChangedResources] to false for package-level uploads so the
+  /// full binary is not tied to Flutter asset change sets.
   Future<void> createPatchArtifact({
     required String artifactPath,
     required String appId,
@@ -330,6 +335,9 @@ class CodePushClient {
     bool? force,
     bool? whitelistEnabled,
     List<String>? uniqueIds,
+    int? number,
+    String? notes,
+    bool attachChangedResources = true,
   }) async {
     final pending = _pendingPatches[patchId];
     if (pending == null) {
@@ -338,8 +346,12 @@ class CodePushClient {
       );
     }
 
-    final resources = changedResources ?? pending.changedResources;
-    final resNumber = resourceNumber ?? pending.resourceNumber;
+    final resources = attachChangedResources
+        ? (changedResources ?? pending.changedResources)
+        : null;
+    final resNumber = attachChangedResources
+        ? (resourceNumber ?? pending.resourceNumber)
+        : null;
     final forceUpload = force ?? pending.force;
     final whitelistOn = whitelistEnabled ?? pending.whitelistEnabled;
     final ids = uniqueIds ?? pending.uniqueIds;
@@ -360,6 +372,8 @@ class CodePushClient {
       if (forceUpload) 'force': true,
       if (whitelistOn != null) 'whitelist_enabled': whitelistOn,
       if (ids != null) 'unique_ids': ids,
+      if (number != null) 'number': number,
+      if (notes != null && notes.isNotEmpty) 'notes': notes,
     };
 
     final response = await _httpClient.post(
@@ -377,15 +391,15 @@ class CodePushClient {
     _idToUuid.putIfAbsent(patchId, () => uuid);
     _uuidToId[uuid] = patchId;
     pending.number = (created['number'] as num?)?.toInt() ?? pending.number;
-    final number = pending.number;
-    if (number != null) {
+    final resolvedNumber = number ?? pending.number;
+    if (resolvedNumber != null) {
       await _artifactCache.write(
         file: _artifactCache.patchFile(
           appId: appId,
           version: pending.releaseVersion,
           platform: platform.name,
           arch: arch,
-          number: number,
+          number: resolvedNumber,
         ),
         bytes: bytes,
         meta: {
@@ -395,6 +409,73 @@ class CodePushClient {
         },
       );
     }
+  }
+
+  /// Downloads a stored admin artifact by relative [artifactPath].
+  Future<File> downloadAdminArtifact(String artifactPath) async {
+    final path = artifactPath.trim();
+    if (path.isEmpty) {
+      throw ArgumentError.value(artifactPath, 'artifactPath', 'must be non-empty');
+    }
+    final response = await _httpClient.get(Uri.parse('$_admin/artifacts/$path'));
+    if (!response.isSuccess) _throw(response);
+    final file = File(
+      '${Directory.systemTemp.createTempSync().path}/${path.split('/').last}',
+    );
+    await file.writeAsBytes(response.bodyBytes, flush: true);
+    return file;
+  }
+
+  /// Uploads a full package patch artifact (aar / xcframework / supplement)
+  /// without attaching Flutter asset change sets.
+  ///
+  /// Used after the code-diff patch is published so `--from-release` can
+  /// promote the patched binary by [hash].
+  Future<Map<String, dynamic>> uploadPatchPackageArtifact({
+    required String appId,
+    required String releaseVersion,
+    required ReleasePlatform platform,
+    required String arch,
+    required String artifactPath,
+    required String hash,
+    required int number,
+    String? notes,
+  }) async {
+    final bytes = await File(artifactPath).readAsBytes();
+    final response = await _httpClient.post(
+      Uri.parse('$_admin/patches'),
+      headers: {'content-type': 'application/json'},
+      body: json.encode({
+        'app_id': appId,
+        'release_version': releaseVersion,
+        'platform': platform.name,
+        'arch': arch,
+        'hash': hash,
+        'content_base64': base64Encode(bytes),
+        'channel': 'stable',
+        'number': number,
+        'force': true,
+        if (notes != null && notes.isNotEmpty) 'notes': notes,
+      }),
+    );
+    if (!response.isSuccess) _throw(response);
+    final created = await _json(response);
+    await _artifactCache.write(
+      file: _artifactCache.patchFile(
+        appId: appId,
+        version: releaseVersion,
+        platform: platform.name,
+        arch: arch,
+        number: number,
+      ),
+      bytes: bytes,
+      meta: {
+        'hash': hash,
+        'size': bytes.length,
+        'patch_id': created['id'],
+      },
+    );
+    return created;
   }
 
   /// Compares candidate [changedResources] against published patches for the
@@ -648,12 +729,14 @@ class CodePushClient {
     return bytes;
   }
 
-  /// Looks up resource + snapshot baselines by full binary [artifactHash].
+  /// Looks up resource + snapshot baselines (+ optional full package patch)
+  /// by full binary [artifactHash].
   ///
   /// Returns `null` when the control plane responds 404.
   Future<Map<String, dynamic>?> lookupBaselinesByArtifactHash({
     required String artifactHash,
     String? appId,
+    String? platform,
   }) async {
     final hash = artifactHash.trim();
     if (hash.isEmpty) {
@@ -664,6 +747,7 @@ class CodePushClient {
         queryParameters: {
           'hash': hash,
           if (appId != null && appId.isNotEmpty) 'app_id': appId,
+          if (platform != null && platform.isNotEmpty) 'platform': platform,
         },
       ),
     );
@@ -1073,6 +1157,37 @@ class CodePushClient {
         notes: m['notes'] as String?,
       );
     }).toList();
+  }
+
+  /// Raw patch rows for a release version (includes package arches).
+  Future<List<Map<String, dynamic>>> getPatchesByReleaseVersion({
+    required String appId,
+    required String releaseVersion,
+    String? platform,
+  }) async {
+    final response = await _httpClient.get(
+      Uri.parse('$_admin/patches').replace(
+        queryParameters: {
+          'app_id': appId,
+          'release_version': releaseVersion,
+        },
+      ),
+    );
+    if (!response.isSuccess) _throw(response);
+    final body = await _json(response);
+    final rows = (body['patches'] as List? ?? const []);
+    final out = <Map<String, dynamic>>[];
+    for (final raw in rows) {
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      if (platform != null &&
+          platform.isNotEmpty &&
+          '${m['platform']}' != platform) {
+        continue;
+      }
+      out.add(m);
+    }
+    return out;
   }
 
   Future<List<ReleaseArtifact>> getReleaseArtifacts({

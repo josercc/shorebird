@@ -563,6 +563,12 @@ Reuse your existing local ${lightCyan.wrap('release/')} artifacts in the host ap
           sourceReleaseId: sourceRelease.id,
           targetReleaseId: release.id,
           platform: releasePlatform,
+          artifactHash: artifactHash,
+          sourcePatchNumber: sourcePatchNumber,
+          sourceReleaseVersion: fromReleaseVersion,
+          // Patched promote must copy the full package; release-cache promote
+          // may only have a contentHash for baselines and still clones release.
+          requirePackageArtifact: sourcePatchNumber != null,
         );
         // Also copy OTA snapshot + resource config so check-ota / asset
         // diffs keep working against the new host-app version.

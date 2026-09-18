@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'package:crypto/crypto.dart';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
@@ -21,6 +22,30 @@ import 'package:shorebird_cli/src/shorebird_env.dart';
 import 'package:shorebird_cli/src/third_party/flutter_tools/lib/flutter_tools.dart';
 import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
 import 'package:shorebird_code_push_protocol/shorebird_code_push_protocol.dart';
+
+/// A full package artifact uploaded alongside a code-diff patch so a later
+/// `--from-release --artifact-hash` can promote the patched binary.
+class PatchPackageArtifact {
+  /// Creates a package artifact descriptor.
+  const PatchPackageArtifact({
+    required this.path,
+    required this.arch,
+    required this.hash,
+    this.notes,
+  });
+
+  /// Absolute path to the file to upload.
+  final String path;
+
+  /// Server arch key (`xcframework`, `aar`, `*_supplement`).
+  final String arch;
+
+  /// sha256 of [path] (must match metax `contentHash` for primary packages).
+  final String hash;
+
+  /// Optional notes stored on the patch row.
+  final String? notes;
+}
 
 /// {@template patcher}
 /// Platform-specific functionality to create a patch.
@@ -249,6 +274,14 @@ More info: ${troubleshootingUrl.toLink()}.
         artifacts: artifacts,
       );
     }
+
+    if (releaseVersion != null && releaseVersion.isNotEmpty) {
+      await _uploadPatchPackageArtifacts(
+        appId: appId,
+        releaseVersion: releaseVersion,
+        patchNumber: patchNumber,
+      );
+    }
   }
 
   bool get _shouldUploadPatchBaselines {
@@ -323,6 +356,55 @@ More info: ${troubleshootingUrl.toLink()}.
   /// Aligns with metax cache `contentHash` for host-app promote flows. Default
   /// is null; aar / ios-framework patchers override.
   Future<String?> resolvePackageBaselineHash() async => null;
+
+  /// Full package files to upload after the code-diff patch (aar / xcframework
+  /// + optional supplement). Default empty; aar / ios-framework override.
+  Future<List<PatchPackageArtifact>> resolvePatchPackageArtifacts() async =>
+      const [];
+
+  /// Uploads full aar / xcframework package artifacts for promote-by-hash.
+  Future<void> _uploadPatchPackageArtifacts({
+    required String appId,
+    required String releaseVersion,
+    required int patchNumber,
+  }) async {
+    final packages = await resolvePatchPackageArtifacts();
+    if (packages.isEmpty) return;
+
+    final progress = logger.progress(
+      'Uploading patch #$patchNumber full package artifact(s)',
+    );
+    try {
+      final client = codePushClientWrapper.codePushClient;
+      for (final package in packages) {
+        final hash = package.hash.trim().isNotEmpty
+            ? package.hash
+            : sha256.convert(await File(package.path).readAsBytes()).toString();
+        await client.uploadPatchPackageArtifact(
+          appId: appId,
+          releaseVersion: releaseVersion,
+          platform: releaseType.releasePlatform,
+          arch: package.arch,
+          artifactPath: package.path,
+          hash: hash,
+          number: patchNumber,
+          notes: package.notes ??
+              'Patch #$patchNumber full package (${package.arch})',
+        );
+        logger.detail(
+          'Uploaded patch #$patchNumber ${package.arch} '
+          '(hash=$hash, size=${await File(package.path).length()})',
+        );
+      }
+      progress.complete(
+        'Uploaded patch #$patchNumber full package '
+        '(${packages.map((p) => p.arch).join(', ')})',
+      );
+    } on Exception catch (error) {
+      progress.fail('Failed to upload patch package artifacts: $error');
+      throw ProcessExit(ExitCode.software.code);
+    }
+  }
 
   bool get _forceDuplicateResources =>
       argResults.options.contains('force-duplicate-resources') &&

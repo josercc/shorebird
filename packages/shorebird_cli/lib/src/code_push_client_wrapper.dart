@@ -968,12 +968,50 @@ aar artifact already exists, continuing...''');
   ///
   /// Used by `--from-release` to register a new host-app version without
   /// rebuilding Flutter when the Dart/Flutter code has not changed.
+  ///
+  /// When [artifactHash] is set, prefers the full package patch artifact
+  /// matching that hash (patched aar / xcframework) instead of the source
+  /// release binaries. Falls back to [sourcePatchNumber] under
+  /// [sourceReleaseVersion], then to source release only when
+  /// [requirePackageArtifact] is false.
   Future<void> cloneReleaseArtifacts({
     required String appId,
     required int sourceReleaseId,
     required int targetReleaseId,
     required ReleasePlatform platform,
+    String? artifactHash,
+    int? sourcePatchNumber,
+    String? sourceReleaseVersion,
+    bool requirePackageArtifact = false,
   }) async {
+    final hash = artifactHash?.trim() ?? '';
+    final wantsPackage = hash.isNotEmpty || sourcePatchNumber != null;
+    if (wantsPackage) {
+      final cloned = await _cloneReleaseArtifactsFromPackagePatch(
+        appId: appId,
+        targetReleaseId: targetReleaseId,
+        platform: platform,
+        artifactHash: hash.isEmpty ? null : hash,
+        sourcePatchNumber: sourcePatchNumber,
+        sourceReleaseVersion: sourceReleaseVersion,
+      );
+      if (cloned) return;
+      if (requirePackageArtifact) {
+        logger.err(
+          'No full package patch artifact found'
+          '${hash.isNotEmpty ? ' for hash $hash' : ''}'
+          '${sourcePatchNumber != null ? ' (patch #$sourcePatchNumber)' : ''}.\n'
+          'Re-run flutterpatch patch so the patched aar/xcframework is uploaded, '
+          'then retry --from-release --artifact-hash / --source-patch-number.',
+        );
+        throw ProcessExit(ExitCode.software.code);
+      }
+      logger.warn(
+        'No full package patch found; '
+        'falling back to cloning source release artifacts.',
+      );
+    }
+
     final sourceArtifacts = await getAllReleaseArtifacts(
       appId: appId,
       releaseId: sourceReleaseId,
@@ -995,10 +1033,11 @@ aar artifact already exists, continuing...''');
         final downloaded = await artifactManager.downloadFile(
           Uri.parse(sourceArtifact.url),
         );
-        final hash = sha256.convert(await downloaded.readAsBytes()).toString();
+        final artifactHashValue =
+            sha256.convert(await downloaded.readAsBytes()).toString();
         logger.detail(
           'Uploading cloned ${sourceArtifact.arch} artifact '
-          '(hash=$hash)',
+          '(hash=$artifactHashValue)',
         );
         await codePushClient.createReleaseArtifact(
           appId: appId,
@@ -1006,7 +1045,7 @@ aar artifact already exists, continuing...''');
           artifactPath: downloaded.path,
           arch: sourceArtifact.arch,
           platform: platform,
-          hash: hash,
+          hash: artifactHashValue,
           canSideload: sourceArtifact.canSideload,
           podfileLockHash: sourceArtifact.podfileLockHash,
         );
@@ -1023,6 +1062,180 @@ ${sourceArtifact.arch} artifact already exists, continuing...''');
       }
     }
     cloneProgress.complete();
+  }
+
+  /// Promotes a patched full-package artifact (and siblings) into [targetReleaseId].
+  ///
+  /// Returns true when a matching package patch was found and cloned.
+  Future<bool> _cloneReleaseArtifactsFromPackagePatch({
+    required String appId,
+    required int targetReleaseId,
+    required ReleasePlatform platform,
+    String? artifactHash,
+    int? sourcePatchNumber,
+    String? sourceReleaseVersion,
+  }) async {
+    Map<String, dynamic>? package;
+    var related = <Map<String, dynamic>>[];
+
+    final hash = artifactHash?.trim() ?? '';
+    if (hash.isNotEmpty) {
+      final lookup = await codePushClient.lookupBaselinesByArtifactHash(
+        artifactHash: hash,
+        appId: appId,
+        platform: platform.name,
+      );
+      package = lookup?['package'] as Map<String, dynamic>?;
+      final relatedRaw = lookup?['related_packages'];
+      if (relatedRaw is List) {
+        for (final row in relatedRaw) {
+          if (row is Map) {
+            related.add(Map<String, dynamic>.from(row));
+          }
+        }
+      }
+    }
+
+    if (package == null &&
+        sourcePatchNumber != null &&
+        sourceReleaseVersion != null &&
+        sourceReleaseVersion.isNotEmpty) {
+      final patches = await codePushClient.getPatchesByReleaseVersion(
+        appId: appId,
+        releaseVersion: sourceReleaseVersion,
+        platform: platform.name,
+      );
+      final packageArches = {
+        'xcframework',
+        'aar',
+        'ios_framework_supplement',
+        'aar_supplement',
+      };
+      related = patches
+          .where(
+            (p) =>
+                (p['number'] as num?)?.toInt() == sourcePatchNumber &&
+                packageArches.contains('${p['arch']}') &&
+                p['rolled_back'] != true &&
+                p['rolled_back'] != 1,
+          )
+          .map((p) => Map<String, dynamic>.from(p))
+          .toList();
+      for (final row in related) {
+        final arch = '${row['arch']}';
+        if (arch == 'xcframework' || arch == 'aar') {
+          package = row;
+          break;
+        }
+      }
+      package ??= related.isEmpty ? null : related.first;
+    }
+
+    if (package == null) return false;
+    if (related.isEmpty) {
+      related = [package];
+    }
+
+    final progress = logger.progress(
+      'Cloning patched package artifact(s)',
+    );
+    try {
+      for (final row in related) {
+        final arch = '${row['arch'] ?? ''}'.trim();
+        final path = '${row['artifact_path'] ?? ''}'.trim();
+        if (arch.isEmpty || path.isEmpty) continue;
+        final downloaded = await codePushClient.downloadAdminArtifact(path);
+        final fileHash = sha256.convert(await downloaded.readAsBytes()).toString();
+        logger.detail('Uploading package $arch (hash=$fileHash)');
+        try {
+          await codePushClient.createReleaseArtifact(
+            appId: appId,
+            releaseId: targetReleaseId,
+            artifactPath: downloaded.path,
+            arch: arch,
+            platform: platform,
+            hash: fileHash,
+            canSideload: false,
+            podfileLockHash: null,
+          );
+        } on CodePushConflictException catch (_) {
+          logger.info('''
+
+$arch artifact already exists, continuing...''');
+        }
+
+        if (arch == 'aar') {
+          await _uploadAarArchArtifactsFromPackage(
+            appId: appId,
+            releaseId: targetReleaseId,
+            platform: platform,
+            aarFile: downloaded,
+          );
+        }
+      }
+      progress.complete(
+        'Cloned patched package from patch '
+        '#${package['number']} (${package['arch']})',
+      );
+      return true;
+    } catch (error) {
+      _handleErrorAndExit(
+        error,
+        progress: progress,
+        message: 'Error cloning patched package artifacts: $error',
+      );
+    }
+  }
+
+  /// Extracts per-arch `libapp.so` from a patched aar and registers them as
+  /// release artifacts (needed by subsequent `flutterpatch patch --aar`).
+  Future<void> _uploadAarArchArtifactsFromPackage({
+    required String appId,
+    required int releaseId,
+    required ReleasePlatform platform,
+    required File aarFile,
+  }) async {
+    final zipPath = p.join(
+      Directory.systemTemp.createTempSync().path,
+      'patched.aar.zip',
+    );
+    aarFile.copySync(zipPath);
+    final extracted = Directory.systemTemp.createTempSync();
+    await artifactManager.extractZip(
+      zipFile: File(zipPath),
+      outputDirectory: extracted,
+    );
+
+    for (final arch in AndroidArch.availableAndroidArchs) {
+      final soPath = p.join(
+        extracted.path,
+        'jni',
+        arch.androidBuildPath,
+        'libapp.so',
+      );
+      final soFile = File(soPath);
+      if (!soFile.existsSync()) {
+        logger.detail('Patched aar missing $soPath, skipping');
+        continue;
+      }
+      final hash = sha256.convert(await soFile.readAsBytes()).toString();
+      try {
+        await codePushClient.createReleaseArtifact(
+          appId: appId,
+          releaseId: releaseId,
+          artifactPath: soFile.path,
+          arch: arch.arch,
+          platform: platform,
+          hash: hash,
+          canSideload: false,
+          podfileLockHash: null,
+        );
+      } on CodePushConflictException catch (_) {
+        logger.info('''
+
+${arch.arch} artifact already exists, continuing...''');
+      }
+    }
   }
 
   /// Copies the latest active OTA snapshot and resource config from
