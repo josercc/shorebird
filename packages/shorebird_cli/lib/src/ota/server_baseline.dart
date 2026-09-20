@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
+import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/ota/check_ota.dart';
 import 'package:shorebird_cli/src/ota/scan_assets.dart';
 import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
@@ -97,14 +98,15 @@ Future<ServerBaseline> fetchServerBaseline({
     releaseVersion: releaseVersion,
     platform: platform,
   );
-  final activeSnaps = snapshots
-      .where((e) => e['rolled_back'] != true && e['rolled_back'] != 1)
-      .toList()
-    ..sort(
-      (a, b) => ((b['number'] as num?)?.toInt() ?? 0).compareTo(
-        (a['number'] as num?)?.toInt() ?? 0,
-      ),
-    );
+  final activeSnaps =
+      snapshots
+          .where((e) => e['rolled_back'] != true && e['rolled_back'] != 1)
+          .toList()
+        ..sort(
+          (a, b) => ((b['number'] as num?)?.toInt() ?? 0).compareTo(
+            (a['number'] as num?)?.toInt() ?? 0,
+          ),
+        );
 
   if (activeSnaps.isNotEmpty) {
     snapshotMeta = activeSnaps.first;
@@ -120,10 +122,11 @@ Future<ServerBaseline> fetchServerBaseline({
       id: id,
       cache: cache,
       forceRefresh: forceRefresh,
-      download: () => client.getOtaSnapshotContent(id),
-      writeCache: cache == null
-          ? null
-          : (b) => cache.writeSnapshot(id, b),
+      download: ({onDownloadProgress}) => client.getOtaSnapshotContent(
+        id,
+        onDownloadProgress: onDownloadProgress,
+      ),
+      writeCache: cache == null ? null : (b) => cache.writeSnapshot(id, b),
       readCache: cache == null ? null : () => cache.readSnapshot(id),
     );
     _assertBaselineContentHash(
@@ -143,14 +146,15 @@ Future<ServerBaseline> fetchServerBaseline({
     releaseVersion: releaseVersion,
     platform: platform,
   );
-  final activeRes = resources
-      .where((e) => e['rolled_back'] != true && e['rolled_back'] != 1)
-      .toList()
-    ..sort(
-      (a, b) => ((b['number'] as num?)?.toInt() ?? 0).compareTo(
-        (a['number'] as num?)?.toInt() ?? 0,
-      ),
-    );
+  final activeRes =
+      resources
+          .where((e) => e['rolled_back'] != true && e['rolled_back'] != 1)
+          .toList()
+        ..sort(
+          (a, b) => ((b['number'] as num?)?.toInt() ?? 0).compareTo(
+            (a['number'] as num?)?.toInt() ?? 0,
+          ),
+        );
 
   if (activeRes.isNotEmpty) {
     resourceMeta = activeRes.first;
@@ -166,10 +170,11 @@ Future<ServerBaseline> fetchServerBaseline({
       id: id,
       cache: cache,
       forceRefresh: forceRefresh,
-      download: () => client.getResourceSnapshotContent(id),
-      writeCache: cache == null
-          ? null
-          : (b) => cache.writeResource(id, b),
+      download: ({onDownloadProgress}) => client.getResourceSnapshotContent(
+        id,
+        onDownloadProgress: onDownloadProgress,
+      ),
+      writeCache: cache == null ? null : (b) => cache.writeResource(id, b),
       readCache: cache == null ? null : () => cache.readResource(id),
     );
     _assertBaselineContentHash(
@@ -263,7 +268,10 @@ Future<List<int>> _loadContentBytes({
   required String id,
   required BaselineContentCache? cache,
   required bool forceRefresh,
-  required Future<List<int>> Function() download,
+  required Future<List<int>> Function({
+    ArtifactDownloadProgressCallback? onDownloadProgress,
+  })
+  download,
   required void Function(List<int> bytes)? writeCache,
   required List<int>? Function()? readCache,
 }) async {
@@ -275,12 +283,22 @@ Future<List<int>> _loadContentBytes({
     }
   }
 
-  stderr.writeln(
-    forceRefresh
-        ? '==> Downloading baseline $kind (refresh): $id'
-        : '==> Downloading baseline $kind: $id',
+  final label = forceRefresh
+      ? 'Downloading baseline $kind (refresh)'
+      : 'Downloading baseline $kind';
+  stderr.writeln('==> $label: $id');
+  final progressUpdater = ByteProgressUpdater(
+    onUpdate: (message) => stderr.writeln('==> $message'),
   );
-  final bytes = await download();
+  final bytes = await download(
+    onDownloadProgress: (event) {
+      progressUpdater.report(
+        label: label,
+        receivedBytes: event.receivedBytes,
+        totalBytes: event.totalBytes,
+      );
+    },
+  );
   writeCache?.call(bytes);
   return bytes;
 }

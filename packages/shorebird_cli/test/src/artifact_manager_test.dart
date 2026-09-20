@@ -228,14 +228,21 @@ void main() {
             );
           });
 
-          test('does not add to stream', () async {
+          test('reports downloaded bytes without a total', () async {
             final download = await runWithOverrides(
               () => artifactManager.startFileDownload(
                 Uri.parse('https://example.com'),
               ),
             );
 
-            expect(await download.progress.toList(), isEmpty);
+            expect(
+              await download.progress.toList(),
+              equals([
+                const DownloadProgress(downloadedBytes: 1),
+                const DownloadProgress(downloadedBytes: 2),
+                const DownloadProgress(downloadedBytes: 3),
+              ]),
+            );
           });
         });
 
@@ -261,7 +268,14 @@ void main() {
               ),
             );
 
-            expect(download.progress, emitsInOrder([1 / 3, 2 / 3, 3 / 3]));
+            expect(
+              download.progress,
+              emitsInOrder([
+                const DownloadProgress(downloadedBytes: 1, totalBytes: 3),
+                const DownloadProgress(downloadedBytes: 2, totalBytes: 3),
+                const DownloadProgress(downloadedBytes: 3, totalBytes: 3),
+              ]),
+            );
           });
 
           test('uses outputPath when specified', () async {
@@ -369,17 +383,25 @@ void main() {
             // trailing throttled update may be 40% or 60% depending on
             // timing. The final 100% always fires.
             verifyInOrder([
-              () => progress.update('hello (20%)'),
+              () => progress.update('hello 1 B / 5 B (20%)'),
               () => progress.update(
-                any(that: anyOf('hello (40%)', 'hello (60%)')),
+                any(
+                  that: anyOf(
+                    'hello 2 B / 5 B (40%)',
+                    'hello 3 B / 5 B (60%)',
+                  ),
+                ),
               ),
-              () => progress.update('hello (100%)'),
+              () => progress.update('hello 5 B / 5 B (100%)'),
             ]);
-            verifyNever(() => progress.update('hello (0%)'));
-            verifyNever(() => progress.update('hello (20%)'));
-            verifyNever(() => progress.update('hello (80%)'));
-            verifyNoMoreInteractions(progress);
+            verifyNever(() => progress.update('hello 0 B / 5 B (0%)'));
+            verifyNever(() => progress.update('hello 1 B / 5 B (20%)'));
+            verifyNever(() => progress.update('hello 4 B / 5 B (80%)'));
             await responseStreamController.close();
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            verify(
+              () => progress.complete('hello 5 B / 5 B (100%)'),
+            ).called(1);
           });
         },
         onPlatform: {'windows': const Skip('Flaky on Windows')},
@@ -406,6 +428,14 @@ void main() {
         );
         expect(file.path, equals(outputPath));
         expect(file.lengthSync(), equals(1));
+      });
+    });
+
+    group('formatByteSize', () {
+      test('formats bytes with appropriate units', () {
+        expect(formatByteSize(500), equals('500 B'));
+        expect(formatByteSize(1536), equals('1.5 KB'));
+        expect(formatByteSize(1572864), equals('1.5 MB'));
       });
     });
 

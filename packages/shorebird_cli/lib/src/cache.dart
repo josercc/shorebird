@@ -207,7 +207,8 @@ abstract class CachedArtifact {
     // Clear any existing artifact files.
     await _delete();
 
-    final updateProgress = logger.progress('Downloading $fileName...');
+    final downloadMessage = 'Downloading $fileName';
+    final updateProgress = logger.progress(downloadMessage);
 
     final url = await storageUrl;
     final request = http.Request('GET', Uri.parse(url));
@@ -215,6 +216,7 @@ abstract class CachedArtifact {
     try {
       response = await httpClient.send(request);
     } catch (error) {
+      updateProgress.fail();
       throw CacheUpdateFailure('''
 Failed to download $fileName: $error
 If you're behind a firewall/proxy, please, make sure shorebird_cli is
@@ -223,6 +225,7 @@ allowed to access $url.''');
 
     if (response.statusCode != HttpStatus.ok) {
       if (!required && response.statusCode == HttpStatus.notFound) {
+        updateProgress.complete();
         logger.detail(
           '[cache] optional artifact: "$fileName" was not found, skipping...',
         );
@@ -235,16 +238,37 @@ allowed to access $url.''');
       );
     }
 
-    updateProgress.complete();
+    final totalBytes = response.contentLength;
+    var downloadedBytes = 0;
+    final progressUpdater = ByteProgressUpdater(
+      onUpdate: updateProgress.update,
+    );
+    final progressStream = response.stream.map((chunk) {
+      downloadedBytes += chunk.length;
+      progressUpdater.report(
+        label: downloadMessage,
+        receivedBytes: downloadedBytes,
+        totalBytes: totalBytes,
+      );
+      return chunk;
+    });
 
-    final extractProgress = logger.progress('Extracting $fileName...');
     final artifactDirectory = Directory(p.dirname(file.path));
     try {
-      await extractArtifact(response.stream, artifactDirectory.path);
+      await extractArtifact(
+        http.ByteStream(progressStream),
+        artifactDirectory.path,
+      );
     } catch (_) {
-      extractProgress.fail();
+      updateProgress.fail();
       rethrow;
     }
+
+    updateProgress.complete(
+      '$downloadMessage ${formatByteProgress(downloadedBytes, totalBytes ?? downloadedBytes)}',
+    );
+
+    final extractProgress = logger.progress('Extracting $fileName...');
 
     final expectedChecksum = checksum;
     if (expectedChecksum != null) {

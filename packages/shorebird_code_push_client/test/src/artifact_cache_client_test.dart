@@ -237,6 +237,56 @@ void main() {
       );
     });
 
+    test('getReleaseArtifacts reports download progress on cache miss', () async {
+      when(() => httpClient.send(any())).thenAnswer((invocation) async {
+        final request =
+            invocation.positionalArguments.first as http.BaseRequest;
+        final path = request.url.path;
+        if (request.method == 'GET' && path.endsWith('/releases')) {
+          return jsonResponse({
+            'releases': [
+              {
+                'id': 'rel-1',
+                'app_id': appId,
+                'version': version,
+                'platform': 'android',
+                'arch': 'aar',
+                'artifact_path': 'obj/aar.bin',
+              },
+            ],
+          });
+        }
+        if (path.endsWith('/artifacts/obj/aar.bin')) {
+          return http.StreamedResponse(
+            Stream.fromIterable([
+              utf8.encode('aa'),
+              utf8.encode('r-bytes'),
+            ]),
+            200,
+            contentLength: 9,
+          );
+        }
+        fail('unexpected ${request.method} $path');
+      });
+
+      final progress = <ArtifactDownloadProgress>[];
+      final client = newClient(httpClient);
+      final releases = await client.getReleases(appId: appId);
+      final artifacts = await client.getReleaseArtifacts(
+        appId: appId,
+        releaseId: releases.single.id,
+        arch: 'aar',
+        platform: ReleasePlatform.android,
+        onDownloadProgress: progress.add,
+      );
+
+      expect(artifacts, hasLength(1));
+      expect(progress, isNotEmpty);
+      expect(progress.last.label, equals('aar'));
+      expect(progress.last.receivedBytes, equals(9));
+      expect(progress.last.totalBytes, equals(9));
+    });
+
     test('OTA snapshot upload then getContent skips HTTP', () async {
       when(() => httpClient.send(any())).thenAnswer((invocation) async {
         final request =
@@ -326,5 +376,126 @@ void main() {
       expect(meta['hash'], 'deadbeef');
       expect(meta['patch_id'], 'patch-uuid');
     });
+
+    test('downloadAdminArtifact caches by storage path', () async {
+      const storagePath = 'obj/sha256/pkg.bin';
+      final payload = utf8.encode('package-bytes');
+      var downloads = 0;
+      when(() => httpClient.send(any())).thenAnswer((invocation) async {
+        final request =
+            invocation.positionalArguments.first as http.BaseRequest;
+        expect(request.url.path, '/admin/v1/artifacts/$storagePath');
+        downloads++;
+        return http.StreamedResponse(
+          Stream.value(payload),
+          200,
+          contentLength: payload.length,
+        );
+      });
+
+      final client = newClient(httpClient);
+      final first = await client.downloadAdminArtifact(storagePath);
+      expect(first.readAsBytesSync(), payload);
+      expect(
+        first.path,
+        LocalArtifactCache(root: cacheRoot).adminArtifactFile(storagePath).path,
+      );
+
+      final readerHttp = _MockHttpClient();
+      when(() => readerHttp.send(any())).thenAnswer((invocation) async {
+        fail('should not hit network for cached admin artifact');
+      });
+      final reader = newClient(readerHttp);
+      final second = await reader.downloadAdminArtifact(storagePath);
+      expect(second.readAsBytesSync(), payload);
+      expect(downloads, 1);
+    });
+
+    test('createReleaseArtifact also writes admin/ storage cache', () async {
+      when(() => httpClient.send(any())).thenAnswer((invocation) async {
+        final request =
+            invocation.positionalArguments.first as http.BaseRequest;
+        final path = request.url.path;
+        if (path.endsWith('/artifacts') && request.method == 'POST') {
+          return jsonResponse({'path': 'obj/aab.bin'}, status: 201);
+        }
+        if (path.endsWith('/releases') && request.method == 'POST') {
+          return jsonResponse({
+            'id': 'rel-uuid',
+            'version': version,
+          }, status: 201);
+        }
+        fail('unexpected ${request.method} $path');
+      });
+
+      final client = newClient(httpClient);
+      final release = await client.createRelease(
+        appId: appId,
+        version: version,
+        flutterRevision: 'rev',
+      );
+      final aab = File(p.join(cacheRoot.path, 'app.aab'))
+        ..writeAsBytesSync(utf8.encode('aab-bytes'));
+      await client.createReleaseArtifact(
+        artifactPath: aab.path,
+        appId: appId,
+        releaseId: release.id,
+        arch: 'aab',
+        platform: ReleasePlatform.android,
+        hash: sha256.convert(utf8.encode('aab-bytes')).toString(),
+        canSideload: true,
+        podfileLockHash: null,
+      );
+
+      final admin = LocalArtifactCache(root: cacheRoot)
+          .adminArtifactFile('obj/aab.bin');
+      expect(admin.existsSync(), isTrue);
+      expect(admin.readAsStringSync(), 'aab-bytes');
+    });
+
+    test(
+      'uploadPatchPackageArtifact dual-writes admin cache by artifact_path',
+      () async {
+        const storagePath = 'obj/sha256/xcframework.bin';
+        final payload = utf8.encode('xcframework-bytes');
+        when(() => httpClient.send(any())).thenAnswer((invocation) async {
+          final request =
+              invocation.positionalArguments.first as http.BaseRequest;
+          expect(request.url.path, '/admin/v1/patches');
+          return jsonResponse({
+            'id': 'pkg-1',
+            'number': 4,
+            'artifact_path': storagePath,
+          }, status: 201);
+        });
+
+        final client = newClient(httpClient);
+        final pkg = File(p.join(cacheRoot.path, 'pkg.xcframework'))
+          ..writeAsBytesSync(payload);
+        await client.uploadPatchPackageArtifact(
+          appId: appId,
+          releaseVersion: version,
+          platform: ReleasePlatform.ios,
+          arch: 'xcframework',
+          artifactPath: pkg.path,
+          hash: sha256.convert(payload).toString(),
+          number: 4,
+        );
+
+        final admin = LocalArtifactCache(
+          root: cacheRoot,
+        ).adminArtifactFile(storagePath);
+        expect(admin.existsSync(), isTrue);
+        expect(admin.readAsBytesSync(), payload);
+
+        final readerHttp = _MockHttpClient();
+        when(() => readerHttp.send(any())).thenAnswer((_) async {
+          fail('cached package should not re-download');
+        });
+        final reader = newClient(readerHttp);
+        final downloaded = await reader.downloadAdminArtifact(storagePath);
+        expect(downloaded.readAsBytesSync(), payload);
+      },
+    );
   });
 }

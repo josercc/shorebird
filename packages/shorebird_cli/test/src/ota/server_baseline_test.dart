@@ -95,10 +95,20 @@ void main() {
           {'id': 'res-1', 'number': 1, 'rolled_back': false},
         ],
       );
-      when(() => client.getOtaSnapshotContent('snap-1')).thenAnswer(
+      when(
+        () => client.getOtaSnapshotContent(
+          'snap-1',
+          onDownloadProgress: any(named: 'onDownloadProgress'),
+        ),
+      ).thenAnswer(
         (_) async => utf8.encode(snapshotJson),
       );
-      when(() => client.getResourceSnapshotContent('res-1')).thenAnswer(
+      when(
+        () => client.getResourceSnapshotContent(
+          'res-1',
+          onDownloadProgress: any(named: 'onDownloadProgress'),
+        ),
+      ).thenAnswer(
         (_) async => utf8.encode(resourceJson),
       );
     });
@@ -126,8 +136,18 @@ void main() {
       expect(second.snapshot, isNotNull);
       expect(second.resourceAssets.single.path, 'assets/a.txt');
       // Content endpoints only called on the first run.
-      verify(() => client.getOtaSnapshotContent('snap-1')).called(1);
-      verify(() => client.getResourceSnapshotContent('res-1')).called(1);
+      verify(
+        () => client.getOtaSnapshotContent(
+          'snap-1',
+          onDownloadProgress: any(named: 'onDownloadProgress'),
+        ),
+      ).called(1);
+      verify(
+        () => client.getResourceSnapshotContent(
+          'res-1',
+          onDownloadProgress: any(named: 'onDownloadProgress'),
+        ),
+      ).called(1);
       // List still runs each time.
       verify(
         () => client.listOtaSnapshots(
@@ -168,10 +188,20 @@ void main() {
           {'id': 'res-1', 'number': 1, 'rolled_back': false},
         ],
       );
-      when(() => client.getOtaSnapshotContent('snap-1')).thenAnswer(
+      when(
+        () => client.getOtaSnapshotContent(
+          'snap-1',
+          onDownloadProgress: any(named: 'onDownloadProgress'),
+        ),
+      ).thenAnswer(
         (_) async => utf8.encode(snapshotJson),
       );
-      when(() => client.getResourceSnapshotContent('res-1')).thenAnswer(
+      when(
+        () => client.getResourceSnapshotContent(
+          'res-1',
+          onDownloadProgress: any(named: 'onDownloadProgress'),
+        ),
+      ).thenAnswer(
         (_) async => utf8.encode(resourceJson),
       );
 
@@ -182,8 +212,18 @@ void main() {
         cache: cache,
         forceRefresh: true,
       );
-      verify(() => client.getOtaSnapshotContent('snap-1')).called(1);
-      verify(() => client.getResourceSnapshotContent('res-1')).called(1);
+      verify(
+        () => client.getOtaSnapshotContent(
+          'snap-1',
+          onDownloadProgress: any(named: 'onDownloadProgress'),
+        ),
+      ).called(1);
+      verify(
+        () => client.getResourceSnapshotContent(
+          'res-1',
+          onDownloadProgress: any(named: 'onDownloadProgress'),
+        ),
+      ).called(1);
     });
 
     test('expectedArtifactHash mismatch throws', () async {

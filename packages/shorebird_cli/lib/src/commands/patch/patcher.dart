@@ -374,6 +374,7 @@ More info: ${troubleshootingUrl.toLink()}.
     final progress = logger.progress(
       'Uploading patch #$patchNumber full package artifact(s)',
     );
+    final progressUpdater = ByteProgressUpdater(onUpdate: progress.update);
     try {
       final client = codePushClientWrapper.codePushClient;
       for (final package in packages) {
@@ -388,8 +389,16 @@ More info: ${troubleshootingUrl.toLink()}.
           artifactPath: package.path,
           hash: hash,
           number: patchNumber,
-          notes: package.notes ??
+          notes:
+              package.notes ??
               'Patch #$patchNumber full package (${package.arch})',
+          onUploadProgress: (event) {
+            progressUpdater.report(
+              label: 'Uploading ${event.label}',
+              receivedBytes: event.sentBytes,
+              totalBytes: event.totalBytes,
+            );
+          },
         );
         logger.detail(
           'Uploaded patch #$patchNumber ${package.arch} '

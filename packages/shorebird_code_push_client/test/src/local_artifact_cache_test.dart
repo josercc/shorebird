@@ -126,5 +126,35 @@ void main() {
             .path,
       );
     });
+
+    test('adminArtifactFile nests sanitized storage path segments', () {
+      final file = cache.adminArtifactFile('obj/sha256/abc.bin');
+      expect(
+        file.path,
+        p.join(temp.path, 'admin', 'obj', 'sha256', 'abc.bin'),
+      );
+    });
+
+    test('adminArtifactFile write/tryRead round-trips', () async {
+      const storagePath = 'patches/aar.bin';
+      final bytes = utf8.encode('patched-aar');
+      final hash = sha256.convert(bytes).toString();
+      final file = cache.adminArtifactFile(storagePath);
+
+      await cache.write(
+        file: file,
+        bytes: bytes,
+        meta: {
+          'hash': hash,
+          'size': bytes.length,
+          'storage_path': storagePath,
+        },
+      );
+
+      final hit = await cache.tryRead(file);
+      expect(hit, isNotNull);
+      expect(hit!.bytes, bytes);
+      expect(hit.meta['storage_path'], storagePath);
+    });
   });
 }

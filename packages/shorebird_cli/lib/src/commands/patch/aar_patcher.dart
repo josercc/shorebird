@@ -109,23 +109,20 @@ class AarPatcher extends Patcher {
     );
 
     final releaseArtifactPaths = <Arch, String>{};
-    final downloadReleaseArtifactProgress = logger.progress(
-      'Downloading release artifacts',
-    );
+    final numArtifacts = releaseArtifacts.length;
 
-    for (final releaseArtifact in releaseArtifacts.entries) {
+    for (final (i, releaseArtifact) in releaseArtifacts.entries.indexed) {
       try {
-        final releaseArtifactFile = await artifactManager.downloadFile(
-          Uri.parse(releaseArtifact.value.url),
-        );
+        final releaseArtifactFile = await artifactManager
+            .downloadWithProgressUpdates(
+              Uri.parse(releaseArtifact.value.url),
+              message: 'Downloading release artifact ${i + 1}/$numArtifacts',
+            );
         releaseArtifactPaths[releaseArtifact.key] = releaseArtifactFile.path;
-      } on Exception catch (error) {
-        downloadReleaseArtifactProgress.fail('$error');
+      } on Exception {
         throw ProcessExit(ExitCode.software.code);
       }
     }
-
-    downloadReleaseArtifactProgress.complete();
 
     final extractedAarDirectory = await shorebirdAndroidArtifacts.extractAar(
       packageName: shorebirdEnv.androidPackageName!,

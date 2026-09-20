@@ -143,6 +143,52 @@ class _CachedRelease {
   final Map<String, ReleaseArtifact> artifacts = {};
 }
 
+/// Byte-level progress for a streamed control_api artifact download.
+class ArtifactDownloadProgress {
+  /// Creates a progress event for [label].
+  const ArtifactDownloadProgress({
+    required this.label,
+    required this.receivedBytes,
+    this.totalBytes,
+  });
+
+  /// Human-readable name for the artifact (e.g. arch `aar`).
+  final String label;
+
+  /// Bytes received so far.
+  final int receivedBytes;
+
+  /// Total size from `Content-Length`, when the server provides it.
+  final int? totalBytes;
+}
+
+/// Callback for artifact download byte progress.
+typedef ArtifactDownloadProgressCallback =
+    void Function(ArtifactDownloadProgress progress);
+
+/// Byte-level progress for a streamed control_api JSON upload.
+class ArtifactUploadProgress {
+  /// Creates a progress event for [label].
+  const ArtifactUploadProgress({
+    required this.label,
+    required this.sentBytes,
+    required this.totalBytes,
+  });
+
+  /// Human-readable name for the artifact (e.g. arch `arm64`).
+  final String label;
+
+  /// Request-body bytes written so far.
+  final int sentBytes;
+
+  /// Total request-body size.
+  final int totalBytes;
+}
+
+/// Callback for artifact upload byte progress.
+typedef ArtifactUploadProgressCallback =
+    void Function(ArtifactUploadProgress progress);
+
 /// Dart client for the FlutterPatch control_api (Shorebird CLI-compatible API).
 class CodePushClient {
   /// Creates a client pointed at FlutterPatch control_api by default.
@@ -338,6 +384,7 @@ class CodePushClient {
     int? number,
     String? notes,
     bool attachChangedResources = true,
+    ArtifactUploadProgressCallback? onUploadProgress,
   }) async {
     final pending = _pendingPatches[patchId];
     if (pending == null) {
@@ -376,10 +423,11 @@ class CodePushClient {
       if (notes != null && notes.isNotEmpty) 'notes': notes,
     };
 
-    final response = await _httpClient.post(
+    final response = await _postJson(
       Uri.parse('$_admin/patches'),
-      headers: {'content-type': 'application/json'},
-      body: json.encode(body),
+      body,
+      progressLabel: arch,
+      onUploadProgress: onUploadProgress,
     );
     if (!response.isSuccess) _throw(response);
 
@@ -412,18 +460,43 @@ class CodePushClient {
   }
 
   /// Downloads a stored admin artifact by relative [artifactPath].
-  Future<File> downloadAdminArtifact(String artifactPath) async {
+  ///
+  /// Hits [LocalArtifactCache.adminArtifactFile] when present; otherwise
+  /// streams from control_api and writes the cache entry. The returned [File]
+  /// is the durable cache path (not a temp copy).
+  Future<File> downloadAdminArtifact(
+    String artifactPath, {
+    ArtifactDownloadProgressCallback? onDownloadProgress,
+  }) async {
     final path = artifactPath.trim();
     if (path.isEmpty) {
-      throw ArgumentError.value(artifactPath, 'artifactPath', 'must be non-empty');
+      throw ArgumentError.value(
+        artifactPath,
+        'artifactPath',
+        'must be non-empty',
+      );
     }
-    final response = await _httpClient.get(Uri.parse('$_admin/artifacts/$path'));
-    if (!response.isSuccess) _throw(response);
-    final file = File(
-      '${Directory.systemTemp.createTempSync().path}/${path.split('/').last}',
+    final label = path.split('/').last;
+    final cacheFile = _artifactCache.adminArtifactFile(path);
+    final hit = await _artifactCache.tryRead(cacheFile);
+    if (hit != null) {
+      onDownloadProgress?.call(
+        ArtifactDownloadProgress(
+          label: label,
+          receivedBytes: hit.bytes.length,
+          totalBytes: hit.bytes.length,
+        ),
+      );
+      return hit.file;
+    }
+
+    final bytes = await _downloadAdminArtifact(
+      path,
+      label: label,
+      onDownloadProgress: onDownloadProgress,
     );
-    await file.writeAsBytes(response.bodyBytes, flush: true);
-    return file;
+    await _writeAdminArtifactCache(storagePath: path, bytes: bytes);
+    return cacheFile;
   }
 
   /// Uploads a full package patch artifact (aar / xcframework / supplement)
@@ -440,12 +513,12 @@ class CodePushClient {
     required String hash,
     required int number,
     String? notes,
+    ArtifactUploadProgressCallback? onUploadProgress,
   }) async {
     final bytes = await File(artifactPath).readAsBytes();
-    final response = await _httpClient.post(
+    final response = await _postJson(
       Uri.parse('$_admin/patches'),
-      headers: {'content-type': 'application/json'},
-      body: json.encode({
+      {
         'app_id': appId,
         'release_version': releaseVersion,
         'platform': platform.name,
@@ -456,10 +529,16 @@ class CodePushClient {
         'number': number,
         'force': true,
         if (notes != null && notes.isNotEmpty) 'notes': notes,
-      }),
+      },
+      progressLabel: arch,
+      onUploadProgress: onUploadProgress,
     );
     if (!response.isSuccess) _throw(response);
     final created = await _json(response);
+    final storagePath =
+        (created['artifact_path'] as String?)?.trim() ??
+        (created['path'] as String?)?.trim() ??
+        '';
     await _artifactCache.write(
       file: _artifactCache.patchFile(
         appId: appId,
@@ -473,8 +552,16 @@ class CodePushClient {
         'hash': hash,
         'size': bytes.length,
         'patch_id': created['id'],
+        if (storagePath.isNotEmpty) 'storage_path': storagePath,
       },
     );
+    if (storagePath.isNotEmpty) {
+      await _writeAdminArtifactCache(
+        storagePath: storagePath,
+        bytes: bytes,
+        hash: hash,
+      );
+    }
     return created;
   }
 
@@ -528,12 +615,12 @@ class CodePushClient {
     String origin = 'release',
     int? patchNumber,
     String? artifactHash,
+    ArtifactUploadProgressCallback? onUploadProgress,
   }) async {
     final hash = sha256.convert(contentBytes).toString();
-    final response = await _httpClient.post(
+    final response = await _postJson(
       Uri.parse('$_admin/resources'),
-      headers: {'content-type': 'application/json'},
-      body: json.encode({
+      {
         'app_id': appId,
         'release_version': releaseVersion,
         'channel': channel,
@@ -546,7 +633,9 @@ class CodePushClient {
         if (patchNumber != null) 'patch_number': patchNumber,
         if (artifactHash != null && artifactHash.isNotEmpty)
           'artifact_hash': artifactHash,
-      }),
+      },
+      progressLabel: 'resource snapshot',
+      onUploadProgress: onUploadProgress,
     );
     if (!response.isSuccess) _throw(response);
     final created = await _json(response);
@@ -599,17 +688,20 @@ class CodePushClient {
   }
 
   /// Downloads resource snapshot JSON bytes by id.
-  Future<List<int>> getResourceSnapshotContent(String id) async {
+  Future<List<int>> getResourceSnapshotContent(
+    String id, {
+    ArtifactDownloadProgressCallback? onDownloadProgress,
+  }) async {
     final cached = await _artifactCache.tryRead(
       _artifactCache.resourceFile(id),
     );
     if (cached != null) return cached.bytes;
 
-    final response = await _httpClient.get(
+    final bytes = await _downloadBytes(
       Uri.parse('$_admin/resources/$id/content'),
+      label: 'resource',
+      onDownloadProgress: onDownloadProgress,
     );
-    if (!response.isSuccess) _throw(response);
-    final bytes = response.bodyBytes;
     await _artifactCache.write(
       file: _artifactCache.resourceFile(id),
       bytes: bytes,
@@ -635,12 +727,12 @@ class CodePushClient {
     String origin = 'release',
     int? patchNumber,
     String? artifactHash,
+    ArtifactUploadProgressCallback? onUploadProgress,
   }) async {
     final hash = sha256.convert(contentBytes).toString();
-    final response = await _httpClient.post(
+    final response = await _postJson(
       Uri.parse('$_admin/snapshots'),
-      headers: {'content-type': 'application/json'},
-      body: json.encode({
+      {
         'app_id': appId,
         'release_version': releaseVersion,
         'channel': channel,
@@ -653,7 +745,9 @@ class CodePushClient {
         if (patchNumber != null) 'patch_number': patchNumber,
         if (artifactHash != null && artifactHash.isNotEmpty)
           'artifact_hash': artifactHash,
-      }),
+      },
+      progressLabel: 'OTA snapshot',
+      onUploadProgress: onUploadProgress,
     );
     if (!response.isSuccess) _throw(response);
     final created = await _json(response);
@@ -707,17 +801,20 @@ class CodePushClient {
   }
 
   /// Downloads OTA snapshot JSON bytes by id.
-  Future<List<int>> getOtaSnapshotContent(String id) async {
+  Future<List<int>> getOtaSnapshotContent(
+    String id, {
+    ArtifactDownloadProgressCallback? onDownloadProgress,
+  }) async {
     final cached = await _artifactCache.tryRead(
       _artifactCache.snapshotFile(id),
     );
     if (cached != null) return cached.bytes;
 
-    final response = await _httpClient.get(
+    final bytes = await _downloadBytes(
       Uri.parse('$_admin/snapshots/$id/content'),
+      label: 'snapshot',
+      onDownloadProgress: onDownloadProgress,
     );
-    if (!response.isSuccess) _throw(response);
-    final bytes = response.bodyBytes;
     await _artifactCache.write(
       file: _artifactCache.snapshotFile(id),
       bytes: bytes,
@@ -740,7 +837,11 @@ class CodePushClient {
   }) async {
     final hash = artifactHash.trim();
     if (hash.isEmpty) {
-      throw ArgumentError.value(artifactHash, 'artifactHash', 'must be non-empty');
+      throw ArgumentError.value(
+        artifactHash,
+        'artifactHash',
+        'must be non-empty',
+      );
     }
     final response = await _httpClient.get(
       Uri.parse('$_admin/baselines/by-artifact-hash').replace(
@@ -769,15 +870,17 @@ class CodePushClient {
   Future<Map<String, dynamic>> uploadContentAddressedAsset({
     required List<int> bytes,
     String? hash,
+    ArtifactUploadProgressCallback? onUploadProgress,
   }) async {
     final computed = hash ?? sha256.convert(bytes).toString();
-    final response = await _httpClient.post(
+    final response = await _postJson(
       Uri.parse('$_admin/assets'),
-      headers: {'content-type': 'application/json'},
-      body: json.encode({
+      {
         'content_base64': base64Encode(bytes),
         'hash': computed,
-      }),
+      },
+      progressLabel: 'asset',
+      onUploadProgress: onUploadProgress,
     );
     if (!response.isSuccess) _throw(response);
     return _json(response);
@@ -837,6 +940,7 @@ class CodePushClient {
     required String hash,
     required bool canSideload,
     required String? podfileLockHash,
+    ArtifactUploadProgressCallback? onUploadProgress,
   }) async {
     final cached = _releases[releaseId];
     if (cached == null) {
@@ -846,10 +950,11 @@ class CodePushClient {
     }
 
     final bytes = await File(artifactPath).readAsBytes();
-    final upload = await _httpClient.post(
+    final upload = await _postJson(
       Uri.parse('$_admin/artifacts'),
-      headers: {'content-type': 'application/json'},
-      body: json.encode({'content_base64': base64Encode(bytes)}),
+      {'content_base64': base64Encode(bytes)},
+      progressLabel: arch,
+      onUploadProgress: onUploadProgress,
     );
     if (!upload.isSuccess) _throw(upload);
     final uploaded = await _json(upload);
@@ -1195,6 +1300,7 @@ class CodePushClient {
     required int releaseId,
     String? arch,
     ReleasePlatform? platform,
+    ArtifactDownloadProgressCallback? onDownloadProgress,
   }) async {
     var cached = _releases[releaseId];
     if (cached == null) {
@@ -1210,6 +1316,7 @@ class CodePushClient {
       cached: cached,
       arch: arch,
       platform: platform,
+      onDownloadProgress: onDownloadProgress,
     );
 
     var artifacts = cached.artifacts.values.toList();
@@ -1231,6 +1338,7 @@ class CodePushClient {
     required _CachedRelease cached,
     String? arch,
     ReleasePlatform? platform,
+    ArtifactDownloadProgressCallback? onDownloadProgress,
   }) async {
     final neededKeys = <String>{};
     if (platform != null && arch != null) {
@@ -1338,7 +1446,11 @@ class CodePushClient {
       );
       if (fromDisk) continue;
 
-      final bytes = await _downloadAdminArtifact(storagePath);
+      final bytes = await _downloadAdminArtifact(
+        storagePath,
+        label: rowArch,
+        onDownloadProgress: onDownloadProgress,
+      );
       final hash = sha256.convert(bytes).toString();
       final cachedFile = await _writeReleaseArtifactCache(
         appId: appId,
@@ -1386,11 +1498,96 @@ class CodePushClient {
     );
   }
 
-  Future<List<int>> _downloadAdminArtifact(String storagePath) async {
-    final uri = Uri.parse('$_admin/artifacts/$storagePath');
-    final response = await _httpClient.get(uri);
-    if (!response.isSuccess) _throw(response);
-    return response.bodyBytes;
+  Future<List<int>> _downloadAdminArtifact(
+    String storagePath, {
+    required String label,
+    ArtifactDownloadProgressCallback? onDownloadProgress,
+  }) {
+    return _downloadBytes(
+      Uri.parse('$_admin/artifacts/$storagePath'),
+      label: label,
+      onDownloadProgress: onDownloadProgress,
+    );
+  }
+
+  Future<List<int>> _downloadBytes(
+    Uri uri, {
+    required String label,
+    ArtifactDownloadProgressCallback? onDownloadProgress,
+  }) async {
+    final request = http.Request('GET', uri);
+    final streamed = await _httpClient.send(request);
+    if (!streamed.isSuccess) {
+      final body = await streamed.stream.bytesToString();
+      throw _parseErrorResponse(streamed.statusCode, body);
+    }
+
+    final totalBytes = streamed.contentLength;
+    final bytes = <int>[];
+    var receivedBytes = 0;
+    await for (final chunk in streamed.stream) {
+      bytes.addAll(chunk);
+      receivedBytes += chunk.length;
+      onDownloadProgress?.call(
+        ArtifactDownloadProgress(
+          label: label,
+          receivedBytes: receivedBytes,
+          totalBytes: totalBytes,
+        ),
+      );
+    }
+    return bytes;
+  }
+
+  /// POSTs JSON, optionally streaming the body so [onUploadProgress] can report
+  /// request-body bytes written.
+  Future<http.Response> _postJson(
+    Uri uri,
+    Map<String, dynamic> body, {
+    String? progressLabel,
+    ArtifactUploadProgressCallback? onUploadProgress,
+  }) async {
+    final encoded = utf8.encode(json.encode(body));
+    if (onUploadProgress == null || progressLabel == null) {
+      return _httpClient.post(
+        uri,
+        headers: {'content-type': 'application/json'},
+        body: encoded,
+      );
+    }
+
+    final totalBytes = encoded.length;
+    final request = http.StreamedRequest('POST', uri)
+      ..headers['content-type'] = 'application/json'
+      ..contentLength = totalBytes;
+
+    final responseFuture = _httpClient.send(request);
+    const chunkSize = 64 * 1024;
+    var sentBytes = 0;
+    onUploadProgress(
+      ArtifactUploadProgress(
+        label: progressLabel,
+        sentBytes: 0,
+        totalBytes: totalBytes,
+      ),
+    );
+    for (var offset = 0; offset < encoded.length; offset += chunkSize) {
+      final end = offset + chunkSize > encoded.length
+          ? encoded.length
+          : offset + chunkSize;
+      request.sink.add(encoded.sublist(offset, end));
+      sentBytes = end;
+      onUploadProgress(
+        ArtifactUploadProgress(
+          label: progressLabel,
+          sentBytes: sentBytes,
+          totalBytes: totalBytes,
+        ),
+      );
+    }
+    await request.sink.close();
+    final streamed = await responseFuture;
+    return http.Response.fromStream(streamed);
   }
 
   Future<File> _writeReleaseArtifactCache({
@@ -1401,8 +1598,8 @@ class CodePushClient {
     required List<int> bytes,
     required String hash,
     required String storagePath,
-  }) {
-    return _artifactCache.write(
+  }) async {
+    final file = await _artifactCache.write(
       file: _artifactCache.releaseFile(
         appId: appId,
         version: version,
@@ -1412,6 +1609,31 @@ class CodePushClient {
       bytes: bytes,
       meta: {
         'hash': hash,
+        'size': bytes.length,
+        'storage_path': storagePath,
+      },
+    );
+    if (storagePath.isNotEmpty) {
+      await _writeAdminArtifactCache(
+        storagePath: storagePath,
+        bytes: bytes,
+        hash: hash,
+      );
+    }
+    return file;
+  }
+
+  Future<File> _writeAdminArtifactCache({
+    required String storagePath,
+    required List<int> bytes,
+    String? hash,
+  }) {
+    final resolvedHash = hash ?? sha256.convert(bytes).toString();
+    return _artifactCache.write(
+      file: _artifactCache.adminArtifactFile(storagePath),
+      bytes: bytes,
+      meta: {
+        'hash': resolvedHash,
         'size': bytes.length,
         'storage_path': storagePath,
       },

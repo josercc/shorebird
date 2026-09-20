@@ -31,6 +31,7 @@ class CachedArtifactFile {
 /// - `snapshots/<id>`
 /// - `resources/<id>`
 /// - `patches/<appId>/<version>/<platform>_<arch>_<number>`
+/// - `admin/<storage_path…>` — keyed by control_api object storage path
 ///
 /// Each file has a sibling `<name>.meta.json` with at least `hash` and `size`.
 class LocalArtifactCache {
@@ -97,6 +98,24 @@ class LocalArtifactCache {
         '${_safe(platform)}_${_safe(arch)}_$number',
       ),
     );
+  }
+
+  /// Admin object-storage blob keyed by relative [storagePath]
+  /// (e.g. `obj/sha256/abc.bin`).
+  File adminArtifactFile(String storagePath) {
+    final parts = storagePath
+        .split(RegExp(r'[/\\]+'))
+        .where((part) => part.isNotEmpty)
+        .map(_safe)
+        .toList();
+    if (parts.isEmpty) {
+      throw ArgumentError.value(
+        storagePath,
+        'storagePath',
+        'must be non-empty',
+      );
+    }
+    return File(p.joinAll([root.path, 'admin', ...parts]));
   }
 
   /// Writes [bytes] and a `.meta.json` sidecar next to [file].

@@ -462,9 +462,13 @@ Please create a release using "flutterpatch release" and try again.
     // TODO(bryanoltman): update this function to only make one call to
     // getReleaseArtifacts.
     final releaseArtifacts = <Arch, ReleaseArtifact>{};
-    final fetchReleaseArtifactProgress = logger.progress(
-      'Fetching release artifacts',
+    const message = 'Fetching release artifacts';
+    final fetchReleaseArtifactProgress = logger.progress(message);
+    final progressUpdater = ByteProgressUpdater(
+      onUpdate: fetchReleaseArtifactProgress.update,
     );
+    var downloaded = false;
+    ArtifactDownloadProgress? lastProgress;
     for (final arch in architectures) {
       try {
         final artifacts = await codePushClient.getReleaseArtifacts(
@@ -472,6 +476,15 @@ Please create a release using "flutterpatch release" and try again.
           releaseId: releaseId,
           arch: arch.arch,
           platform: platform,
+          onDownloadProgress: (event) {
+            downloaded = true;
+            lastProgress = event;
+            progressUpdater.report(
+              label: 'Fetching ${event.label} artifact',
+              receivedBytes: event.receivedBytes,
+              totalBytes: event.totalBytes,
+            );
+          },
         );
         if (artifacts.isEmpty) {
           continue;
@@ -482,7 +495,17 @@ Please create a release using "flutterpatch release" and try again.
       }
     }
 
-    fetchReleaseArtifactProgress.complete();
+    if (downloaded && lastProgress != null) {
+      final last = lastProgress!;
+      fetchReleaseArtifactProgress.complete(
+        'Fetching release artifacts ${formatByteProgress(
+          last.receivedBytes,
+          last.totalBytes ?? last.receivedBytes,
+        )}',
+      );
+    } else {
+      fetchReleaseArtifactProgress.complete('$message (cached)');
+    }
     return releaseArtifacts;
   }
 
@@ -495,15 +518,28 @@ Please create a release using "flutterpatch release" and try again.
     required String arch,
     required ReleasePlatform platform,
   }) async {
-    final fetchReleaseArtifactProgress = logger.progress(
-      'Fetching $arch artifact',
+    final message = 'Fetching $arch artifact';
+    final fetchReleaseArtifactProgress = logger.progress(message);
+    final progressUpdater = ByteProgressUpdater(
+      onUpdate: fetchReleaseArtifactProgress.update,
     );
+    var downloaded = false;
+    ArtifactDownloadProgress? lastProgress;
     try {
       final artifacts = await codePushClient.getReleaseArtifacts(
         appId: appId,
         releaseId: releaseId,
         arch: arch,
         platform: platform,
+        onDownloadProgress: (event) {
+          downloaded = true;
+          lastProgress = event;
+          progressUpdater.report(
+            label: message,
+            receivedBytes: event.receivedBytes,
+            totalBytes: event.totalBytes,
+          );
+        },
       );
       if (artifacts.isEmpty) {
         throw CodePushNotFoundException(
@@ -511,7 +547,17 @@ Please create a release using "flutterpatch release" and try again.
               '''No artifact found for architecture $arch in release $releaseId''',
         );
       }
-      fetchReleaseArtifactProgress.complete();
+      if (downloaded && lastProgress != null) {
+        final last = lastProgress!;
+        fetchReleaseArtifactProgress.complete(
+          '$message ${formatByteProgress(
+            last.receivedBytes,
+            last.totalBytes ?? last.receivedBytes,
+          )}',
+        );
+      } else {
+        fetchReleaseArtifactProgress.complete('$message (cached)');
+      }
       return artifacts.first;
     } catch (error) {
       _handleErrorAndExit(error, progress: fetchReleaseArtifactProgress);
@@ -526,15 +572,28 @@ Please create a release using "flutterpatch release" and try again.
     required String arch,
     required ReleasePlatform platform,
   }) async {
-    final fetchReleaseArtifactProgress = logger.progress(
-      'Fetching $arch artifact',
+    final message = 'Fetching $arch artifact';
+    final fetchReleaseArtifactProgress = logger.progress(message);
+    final progressUpdater = ByteProgressUpdater(
+      onUpdate: fetchReleaseArtifactProgress.update,
     );
+    var downloaded = false;
+    ArtifactDownloadProgress? lastProgress;
     try {
       final artifacts = await codePushClient.getReleaseArtifacts(
         appId: appId,
         releaseId: releaseId,
         arch: arch,
         platform: platform,
+        onDownloadProgress: (event) {
+          downloaded = true;
+          lastProgress = event;
+          progressUpdater.report(
+            label: message,
+            receivedBytes: event.receivedBytes,
+            totalBytes: event.totalBytes,
+          );
+        },
       );
       if (artifacts.isEmpty) {
         throw CodePushNotFoundException(
@@ -542,7 +601,17 @@ Please create a release using "flutterpatch release" and try again.
               '''No artifact found for architecture $arch in release $releaseId''',
         );
       }
-      fetchReleaseArtifactProgress.complete();
+      if (downloaded && lastProgress != null) {
+        final last = lastProgress!;
+        fetchReleaseArtifactProgress.complete(
+          '$message ${formatByteProgress(
+            last.receivedBytes,
+            last.totalBytes ?? last.receivedBytes,
+          )}',
+        );
+      } else {
+        fetchReleaseArtifactProgress.complete('$message (cached)');
+      }
       return artifacts.first;
     } on CodePushNotFoundException {
       fetchReleaseArtifactProgress.complete();
@@ -563,6 +632,7 @@ Please create a release using "flutterpatch release" and try again.
     String? flavor,
   }) async {
     final createArtifactProgress = logger.progress('Uploading artifacts');
+    final onUploadProgress = _uploadReporter(createArtifactProgress);
     final archsDir = await ArtifactManager.androidArchsDirectoryFromAab(
       projectRoot: Directory(projectRoot),
       flavor: flavor,
@@ -623,6 +693,8 @@ Looked in:
           hash: hash,
           canSideload: false,
           podfileLockHash: null,
+
+          onUploadProgress: onUploadProgress,
         );
         uploadedArchCount++;
       } on CodePushConflictException catch (_) {
@@ -670,6 +742,7 @@ to the architectures your project actually builds.''',
         hash: sha256.convert(await File(aabPath).readAsBytes()).toString(),
         canSideload: true,
         podfileLockHash: null,
+        onUploadProgress: onUploadProgress,
       );
     } on CodePushConflictException catch (_) {
       // Newlines are due to how logger.info interacts with logger.progress.
@@ -695,6 +768,7 @@ aab artifact already exists, continuing...''');
     required String releaseZipPath,
   }) async {
     final createArtifactProgress = logger.progress('Uploading artifacts');
+    final onUploadProgress = _uploadReporter(createArtifactProgress);
 
     try {
       // logger.detail('Uploading artifact for $aabPath');
@@ -709,6 +783,8 @@ aab artifact already exists, continuing...''');
             .toString(),
         canSideload: true,
         podfileLockHash: null,
+
+        onUploadProgress: onUploadProgress,
       );
     } on CodePushConflictException catch (_) {
       // Newlines are due to how logger.info interacts with logger.progress.
@@ -735,6 +811,7 @@ Windows release (exe) artifact already exists, continuing...''');
     required Iterable<Arch> architectures,
   }) async {
     final createArtifactProgress = logger.progress('Uploading artifacts');
+    final onUploadProgress = _uploadReporter(createArtifactProgress);
 
     for (final arch in architectures) {
       final artifactPath = p.join(
@@ -757,6 +834,8 @@ Windows release (exe) artifact already exists, continuing...''');
           hash: hash,
           canSideload: false,
           podfileLockHash: null,
+
+          onUploadProgress: onUploadProgress,
         );
       } on CodePushConflictException catch (_) {
         // Newlines are due to how logger.info interacts with logger.progress.
@@ -783,6 +862,8 @@ ${arch.arch} artifact already exists, continuing...''');
         hash: sha256.convert(await File(aarPath).readAsBytes()).toString(),
         canSideload: false,
         podfileLockHash: null,
+
+        onUploadProgress: onUploadProgress,
       );
     } on CodePushConflictException catch (_) {
       // Newlines are due to how logger.info interacts with logger.progress.
@@ -824,6 +905,7 @@ aar artifact already exists, continuing...''');
     required Directory bundle,
   }) async {
     final createArtifactProgress = logger.progress('Uploading artifacts');
+    final onUploadProgress = _uploadReporter(createArtifactProgress);
     final zippedBundle = await Directory(bundle.path).zipToTempFile();
     try {
       await codePushClient.createReleaseArtifact(
@@ -835,6 +917,8 @@ aar artifact already exists, continuing...''');
         hash: sha256.convert(await zippedBundle.readAsBytes()).toString(),
         canSideload: true,
         podfileLockHash: null,
+
+        onUploadProgress: onUploadProgress,
       );
     } catch (error) {
       _handleErrorAndExit(
@@ -856,6 +940,7 @@ aar artifact already exists, continuing...''');
     required String? podfileLockHash,
   }) async {
     final createArtifactProgress = logger.progress('Uploading artifacts');
+    final onUploadProgress = _uploadReporter(createArtifactProgress);
     final tempDir = await Directory.systemTemp.createTemp();
     final zippedApp = File(p.join(tempDir.path, '${p.basename(appPath)}.zip'));
     await ditto.archive(source: appPath, destination: zippedApp.path);
@@ -870,6 +955,8 @@ aar artifact already exists, continuing...''');
         hash: sha256.convert(await zippedApp.readAsBytes()).toString(),
         canSideload: true,
         podfileLockHash: podfileLockHash,
+
+        onUploadProgress: onUploadProgress,
       );
     } catch (error) {
       _handleErrorAndExit(
@@ -893,6 +980,7 @@ aar artifact already exists, continuing...''');
     required String? podfileLockHash,
   }) async {
     final createArtifactProgress = logger.progress('Uploading artifacts');
+    final onUploadProgress = _uploadReporter(createArtifactProgress);
     final thinnedArchiveDirectory = await _thinXcarchive(
       xcarchivePath: xcarchivePath,
     );
@@ -907,6 +995,8 @@ aar artifact already exists, continuing...''');
         hash: sha256.convert(await zippedArchive.readAsBytes()).toString(),
         canSideload: false,
         podfileLockHash: podfileLockHash,
+
+        onUploadProgress: onUploadProgress,
       );
     } catch (error) {
       _handleErrorAndExit(
@@ -928,6 +1018,8 @@ aar artifact already exists, continuing...''');
         hash: sha256.convert(await zippedRunner.readAsBytes()).toString(),
         canSideload: isCodesigned,
         podfileLockHash: podfileLockHash,
+
+        onUploadProgress: onUploadProgress,
       );
     } catch (error) {
       _handleErrorAndExit(
@@ -947,16 +1039,39 @@ aar artifact already exists, continuing...''');
     required int releaseId,
     required ReleasePlatform platform,
   }) async {
-    final fetchReleaseArtifactProgress = logger.progress(
-      'Fetching release artifacts',
+    const message = 'Fetching release artifacts';
+    final fetchReleaseArtifactProgress = logger.progress(message);
+    final progressUpdater = ByteProgressUpdater(
+      onUpdate: fetchReleaseArtifactProgress.update,
     );
+    var downloaded = false;
+    ArtifactDownloadProgress? lastProgress;
     try {
       final artifacts = await codePushClient.getReleaseArtifacts(
         appId: appId,
         releaseId: releaseId,
         platform: platform,
+        onDownloadProgress: (event) {
+          downloaded = true;
+          lastProgress = event;
+          progressUpdater.report(
+            label: 'Fetching ${event.label} artifact',
+            receivedBytes: event.receivedBytes,
+            totalBytes: event.totalBytes,
+          );
+        },
       );
-      fetchReleaseArtifactProgress.complete();
+      if (downloaded && lastProgress != null) {
+        final last = lastProgress!;
+        fetchReleaseArtifactProgress.complete(
+          '$message ${formatByteProgress(
+            last.receivedBytes,
+            last.totalBytes ?? last.receivedBytes,
+          )}',
+        );
+      } else {
+        fetchReleaseArtifactProgress.complete('$message (cached)');
+      }
       return artifacts;
     } catch (error) {
       _handleErrorAndExit(error, progress: fetchReleaseArtifactProgress);
@@ -1028,13 +1143,25 @@ aar artifact already exists, continuing...''');
     final cloneProgress = logger.progress(
       'Cloning ${sourceArtifacts.length} artifact(s)',
     );
+    final downloadUpdater = ByteProgressUpdater(onUpdate: cloneProgress.update);
+    final onUploadProgress = _uploadReporter(cloneProgress);
     for (final sourceArtifact in sourceArtifacts) {
       try {
-        final downloaded = await artifactManager.downloadFile(
+        final download = await artifactManager.startFileDownload(
           Uri.parse(sourceArtifact.url),
         );
-        final artifactHashValue =
-            sha256.convert(await downloaded.readAsBytes()).toString();
+        final subscription = download.progress.listen((event) {
+          downloadUpdater.report(
+            label: 'Downloading ${sourceArtifact.arch}',
+            receivedBytes: event.downloadedBytes,
+            totalBytes: event.totalBytes,
+          );
+        });
+        final downloaded = await download.file;
+        await subscription.cancel();
+        final artifactHashValue = sha256
+            .convert(await downloaded.readAsBytes())
+            .toString();
         logger.detail(
           'Uploading cloned ${sourceArtifact.arch} artifact '
           '(hash=$artifactHashValue)',
@@ -1048,6 +1175,7 @@ aar artifact already exists, continuing...''');
           hash: artifactHashValue,
           canSideload: sourceArtifact.canSideload,
           podfileLockHash: sourceArtifact.podfileLockHash,
+          onUploadProgress: onUploadProgress,
         );
       } on CodePushConflictException catch (_) {
         logger.info('''
@@ -1139,13 +1267,26 @@ ${sourceArtifact.arch} artifact already exists, continuing...''');
     final progress = logger.progress(
       'Cloning patched package artifact(s)',
     );
+    final downloadUpdater = ByteProgressUpdater(onUpdate: progress.update);
+    final onUploadProgress = _uploadReporter(progress);
     try {
       for (final row in related) {
         final arch = '${row['arch'] ?? ''}'.trim();
         final path = '${row['artifact_path'] ?? ''}'.trim();
         if (arch.isEmpty || path.isEmpty) continue;
-        final downloaded = await codePushClient.downloadAdminArtifact(path);
-        final fileHash = sha256.convert(await downloaded.readAsBytes()).toString();
+        final downloaded = await codePushClient.downloadAdminArtifact(
+          path,
+          onDownloadProgress: (event) {
+            downloadUpdater.report(
+              label: 'Downloading $arch',
+              receivedBytes: event.receivedBytes,
+              totalBytes: event.totalBytes,
+            );
+          },
+        );
+        final fileHash = sha256
+            .convert(await downloaded.readAsBytes())
+            .toString();
         logger.detail('Uploading package $arch (hash=$fileHash)');
         try {
           await codePushClient.createReleaseArtifact(
@@ -1157,6 +1298,7 @@ ${sourceArtifact.arch} artifact already exists, continuing...''');
             hash: fileHash,
             canSideload: false,
             podfileLockHash: null,
+            onUploadProgress: onUploadProgress,
           );
         } on CodePushConflictException catch (_) {
           logger.info('''
@@ -1170,6 +1312,7 @@ $arch artifact already exists, continuing...''');
             releaseId: targetReleaseId,
             platform: platform,
             aarFile: downloaded,
+            onUploadProgress: onUploadProgress,
           );
         }
       }
@@ -1194,6 +1337,7 @@ $arch artifact already exists, continuing...''');
     required int releaseId,
     required ReleasePlatform platform,
     required File aarFile,
+    ArtifactUploadProgressCallback? onUploadProgress,
   }) async {
     final zipPath = p.join(
       Directory.systemTemp.createTempSync().path,
@@ -1229,6 +1373,7 @@ $arch artifact already exists, continuing...''');
           hash: hash,
           canSideload: false,
           podfileLockHash: null,
+          onUploadProgress: onUploadProgress,
         );
       } on CodePushConflictException catch (_) {
         logger.info('''
@@ -1257,9 +1402,12 @@ ${arch.arch} artifact already exists, continuing...''');
     String? artifactHash,
     int? sourcePatchNumber,
   }) async {
-    final strict = (artifactHash != null && artifactHash.trim().isNotEmpty) ||
+    final strict =
+        (artifactHash != null && artifactHash.trim().isNotEmpty) ||
         sourcePatchNumber != null;
     final progress = logger.progress('Cloning OTA baselines');
+    final downloadUpdater = ByteProgressUpdater(onUpdate: progress.update);
+    final onUploadProgress = _uploadReporter(progress);
     try {
       var clonedSnapshot = false;
       var clonedResources = false;
@@ -1278,7 +1426,16 @@ ${arch.arch} artifact already exists, continuing...''');
       );
       if (activeSnapshot != null) {
         final id = activeSnapshot['id'] as String;
-        final bytes = await codePushClient.getOtaSnapshotContent(id);
+        final bytes = await codePushClient.getOtaSnapshotContent(
+          id,
+          onDownloadProgress: (event) {
+            downloadUpdater.report(
+              label: 'Downloading snapshot',
+              receivedBytes: event.receivedBytes,
+              totalBytes: event.totalBytes,
+            );
+          },
+        );
         _assertClonedBaseline(
           meta: activeSnapshot,
           bytes: bytes,
@@ -1291,11 +1448,9 @@ ${arch.arch} artifact already exists, continuing...''');
         final fileCount = decoded is Map && decoded['files'] is List
             ? (decoded['files'] as List).length
             : (activeSnapshot['file_count'] as num?)?.toInt();
-        final channel =
-            activeSnapshot['channel'] as String? ?? 'stable';
+        final channel = activeSnapshot['channel'] as String? ?? 'stable';
         final sourceOrigin = '${activeSnapshot['origin'] ?? 'release'}';
-        final sourcePatch =
-            (activeSnapshot['patch_number'] as num?)?.toInt();
+        final sourcePatch = (activeSnapshot['patch_number'] as num?)?.toInt();
         final notes = sourceOrigin == 'patch' && sourcePatch != null
             ? 'Cloned from $sourceReleaseVersion (patch #$sourcePatch)'
             : 'Cloned from $sourceReleaseVersion';
@@ -1308,8 +1463,9 @@ ${arch.arch} artifact already exists, continuing...''');
           notes: notes,
           fileCount: fileCount,
           origin: 'release',
-          artifactHash: artifactHash ??
-              activeSnapshot['artifact_hash'] as String?,
+          artifactHash:
+              artifactHash ?? activeSnapshot['artifact_hash'] as String?,
+          onUploadProgress: onUploadProgress,
         );
         clonedSnapshot = true;
         logger.detail(
@@ -1334,6 +1490,13 @@ ${arch.arch} artifact already exists, continuing...''');
         final id = activeResource['id'] as String;
         final sourceBytes = await codePushClient.getResourceSnapshotContent(
           id,
+          onDownloadProgress: (event) {
+            downloadUpdater.report(
+              label: 'Downloading resource config',
+              receivedBytes: event.receivedBytes,
+              totalBytes: event.totalBytes,
+            );
+          },
         );
         _assertClonedBaseline(
           meta: activeResource,
@@ -1351,11 +1514,9 @@ ${arch.arch} artifact already exists, continuing...''');
         final resourceCount = decoded is Map && decoded['resources'] is List
             ? (decoded['resources'] as List).length
             : (activeResource['resource_count'] as num?)?.toInt();
-        final channel =
-            activeResource['channel'] as String? ?? 'stable';
+        final channel = activeResource['channel'] as String? ?? 'stable';
         final sourceOrigin = '${activeResource['origin'] ?? 'release'}';
-        final sourcePatch =
-            (activeResource['patch_number'] as num?)?.toInt();
+        final sourcePatch = (activeResource['patch_number'] as num?)?.toInt();
         final notes = sourceOrigin == 'patch' && sourcePatch != null
             ? 'Cloned from $sourceReleaseVersion (patch #$sourcePatch)'
             : 'Cloned from $sourceReleaseVersion';
@@ -1368,8 +1529,9 @@ ${arch.arch} artifact already exists, continuing...''');
           notes: notes,
           resourceCount: resourceCount,
           origin: 'release',
-          artifactHash: artifactHash ??
-              activeResource['artifact_hash'] as String?,
+          artifactHash:
+              artifactHash ?? activeResource['artifact_hash'] as String?,
+          onUploadProgress: onUploadProgress,
         );
         clonedResources = true;
         logger.detail(
@@ -1428,24 +1590,24 @@ Release artifacts were cloned; re-run baselines manually:
     required String kind,
   }) {
     final expectedHash = artifactHash?.trim().toLowerCase();
-    final filtered = rows.where((e) {
-      if (e['rolled_back'] == true || e['rolled_back'] == 1) return false;
-      if (expectedHash != null && expectedHash.isNotEmpty) {
-        final actual = '${e['artifact_hash'] ?? ''}'.trim().toLowerCase();
-        if (actual != expectedHash) return false;
-      }
-      if (sourcePatchNumber != null) {
-        final origin = '${e['origin'] ?? ''}'.trim().toLowerCase();
-        final patch = (e['patch_number'] as num?)?.toInt();
-        if (origin != 'patch' || patch != sourcePatchNumber) return false;
-      }
-      return true;
-    }).toList()
-      ..sort(
-        (a, b) => ((b['number'] as num?)?.toInt() ?? 0).compareTo(
-          (a['number'] as num?)?.toInt() ?? 0,
-        ),
-      );
+    final filtered =
+        rows.where((e) {
+          if (e['rolled_back'] == true || e['rolled_back'] == 1) return false;
+          if (expectedHash != null && expectedHash.isNotEmpty) {
+            final actual = '${e['artifact_hash'] ?? ''}'.trim().toLowerCase();
+            if (actual != expectedHash) return false;
+          }
+          if (sourcePatchNumber != null) {
+            final origin = '${e['origin'] ?? ''}'.trim().toLowerCase();
+            final patch = (e['patch_number'] as num?)?.toInt();
+            if (origin != 'patch' || patch != sourcePatchNumber) return false;
+          }
+          return true;
+        }).toList()..sort(
+          (a, b) => ((b['number'] as num?)?.toInt() ?? 0).compareTo(
+            (a['number'] as num?)?.toInt() ?? 0,
+          ),
+        );
     if (filtered.isEmpty &&
         (expectedHash != null && expectedHash.isNotEmpty ||
             sourcePatchNumber != null)) {
@@ -1538,6 +1700,7 @@ Release artifacts were cloned; re-run baselines manually:
     required String appFrameworkPath,
   }) async {
     final createArtifactProgress = logger.progress('Uploading artifacts');
+    final onUploadProgress = _uploadReporter(createArtifactProgress);
     final appFrameworkDirectory = Directory(appFrameworkPath);
     final zippedAppFrameworkFile = await appFrameworkDirectory.zipToTempFile();
     try {
@@ -1552,6 +1715,8 @@ Release artifacts were cloned; re-run baselines manually:
             .toString(),
         canSideload: false,
         podfileLockHash: null,
+
+        onUploadProgress: onUploadProgress,
       );
     } catch (error) {
       _handleErrorAndExit(
@@ -1575,6 +1740,7 @@ Release artifacts were cloned; re-run baselines manually:
     final createSupplementProgress = logger.progress(
       'Uploading supplement artifacts',
     );
+    final onUploadProgress = _uploadReporter(createSupplementProgress);
     final zippedSupplement = await Directory(
       supplementDirectoryPath,
     ).zipToTempFile(name: arch);
@@ -1594,6 +1760,7 @@ Release artifacts were cloned; re-run baselines manually:
         // tables, dispatch tables) and have no dependency on native pods, so
         // the podfile lock hash is not applicable here.
         podfileLockHash: null,
+        onUploadProgress: onUploadProgress,
       );
     } catch (error) {
       _handleErrorAndExit(
@@ -1645,7 +1812,13 @@ Release artifacts were cloned; re-run baselines manually:
     required Map<Arch, PatchArtifactBundle> patchArtifactBundles,
   }) async {
     final createArtifactProgress = logger.progress('Uploading artifacts');
+    final progressUpdater = ByteProgressUpdater(
+      onUpdate: createArtifactProgress.update,
+    );
+    final total = patchArtifactBundles.length;
+    var index = 0;
     for (final artifact in patchArtifactBundles.values) {
+      index++;
       try {
         await codePushClient.createPatchArtifact(
           appId: appId,
@@ -1656,6 +1829,13 @@ Release artifacts were cloned; re-run baselines manually:
           hash: artifact.hash,
           hashSignature: artifact.hashSignature,
           podfileLockHash: artifact.podfileLockHash,
+          onUploadProgress: (event) {
+            progressUpdater.report(
+              label: 'Uploading ${event.label} ($index/$total)',
+              receivedBytes: event.sentBytes,
+              totalBytes: event.totalBytes,
+            );
+          },
         );
       } catch (error) {
         _handleErrorAndExit(error, progress: createArtifactProgress);
@@ -1824,5 +2004,17 @@ Release artifacts were cloned; re-run baselines manually:
     }
 
     throw ProcessExit(ExitCode.software.code);
+  }
+
+  /// Forwards upload byte events to [progress].
+  ArtifactUploadProgressCallback _uploadReporter(Progress progress) {
+    final updater = ByteProgressUpdater(onUpdate: progress.update);
+    return (event) {
+      updater.report(
+        label: 'Uploading ${event.label}',
+        receivedBytes: event.sentBytes,
+        totalBytes: event.totalBytes,
+      );
+    };
   }
 }

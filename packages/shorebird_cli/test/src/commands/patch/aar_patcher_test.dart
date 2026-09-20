@@ -440,7 +440,10 @@ void main() {
       setUp(() {
         releaseArtifactFile = File('');
         when(
-          () => artifactManager.downloadFile(any()),
+          () => artifactManager.downloadWithProgressUpdates(
+            any(),
+            message: any(named: 'message'),
+          ),
         ).thenAnswer((_) async => releaseArtifactFile);
 
         when(
@@ -484,7 +487,12 @@ void main() {
       group('when release artifact download fails', () {
         final exception = Exception('error');
         setUp(() {
-          when(() => artifactManager.downloadFile(any())).thenThrow(exception);
+          when(
+            () => artifactManager.downloadWithProgressUpdates(
+              any(),
+              message: any(named: 'message'),
+            ),
+          ).thenThrow(exception);
         });
 
         test('logs error and exits with code 70', () async {
@@ -498,8 +506,6 @@ void main() {
             ),
             exitsWithCode(ExitCode.software),
           );
-
-          verify(() => progress.fail('Exception: error')).called(1);
         });
       });
 

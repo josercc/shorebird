@@ -180,6 +180,9 @@ void main() {
       registerFallbackValue(ReleasePlatform.android);
       registerFallbackValue(ReleaseStatus.draft);
       registerFallbackValue(Uri.parse('https://example.com'));
+      registerFallbackValue(
+        (ArtifactDownloadProgress _) {},
+      );
     });
 
     setUp(() {
@@ -1194,6 +1197,8 @@ Please bump your version number and try again.''',
               releaseId: any(named: 'releaseId'),
               arch: any(named: 'arch'),
               platform: any(named: 'platform'),
+
+              onDownloadProgress: any(named: 'onDownloadProgress'),
             ),
           ).thenThrow(error);
 
@@ -1218,6 +1223,8 @@ Please bump your version number and try again.''',
               releaseId: any(named: 'releaseId'),
               arch: any(named: 'arch'),
               platform: any(named: 'platform'),
+
+              onDownloadProgress: any(named: 'onDownloadProgress'),
             ),
           ).thenAnswer((_) async => []);
           when(
@@ -1226,6 +1233,8 @@ Please bump your version number and try again.''',
               releaseId: any(named: 'releaseId'),
               arch: 'aarch64',
               platform: any(named: 'platform'),
+
+              onDownloadProgress: any(named: 'onDownloadProgress'),
             ),
           ).thenAnswer((_) async => [releaseArtifact]);
 
@@ -1251,6 +1260,8 @@ Please bump your version number and try again.''',
                 releaseId: any(named: 'releaseId'),
                 arch: any(named: 'arch'),
                 platform: any(named: 'platform'),
+
+                onDownloadProgress: any(named: 'onDownloadProgress'),
               ),
             ).thenAnswer((_) async => [releaseArtifact]);
 
@@ -1264,7 +1275,9 @@ Please bump your version number and try again.''',
             );
 
             expect(result, {arch: releaseArtifact});
-            verify(() => progress.complete()).called(1);
+            verify(
+              () => progress.complete('Fetching release artifacts (cached)'),
+            ).called(1);
           },
         );
       });
@@ -1278,6 +1291,7 @@ Please bump your version number and try again.''',
               releaseId: any(named: 'releaseId'),
               arch: any(named: 'arch'),
               platform: any(named: 'platform'),
+              onDownloadProgress: any(named: 'onDownloadProgress'),
             ),
           ).thenThrow(error);
 
@@ -1303,6 +1317,7 @@ Please bump your version number and try again.''',
               releaseId: any(named: 'releaseId'),
               arch: any(named: 'arch'),
               platform: any(named: 'platform'),
+              onDownloadProgress: any(named: 'onDownloadProgress'),
             ),
           ).thenAnswer((_) async => []);
 
@@ -1332,6 +1347,7 @@ Please bump your version number and try again.''',
               releaseId: any(named: 'releaseId'),
               arch: any(named: 'arch'),
               platform: any(named: 'platform'),
+              onDownloadProgress: any(named: 'onDownloadProgress'),
             ),
           ).thenAnswer((_) async => [releaseArtifact]);
 
@@ -1345,7 +1361,9 @@ Please bump your version number and try again.''',
           );
 
           expect(result, releaseArtifact);
-          verify(() => progress.complete()).called(1);
+          verify(
+            () => progress.complete('Fetching ${arch.arch} artifact (cached)'),
+          ).called(1);
         });
       });
 
@@ -1358,6 +1376,7 @@ Please bump your version number and try again.''',
               releaseId: any(named: 'releaseId'),
               arch: any(named: 'arch'),
               platform: any(named: 'platform'),
+              onDownloadProgress: any(named: 'onDownloadProgress'),
             ),
           ).thenThrow(error);
 
@@ -1383,6 +1402,7 @@ Please bump your version number and try again.''',
               releaseId: any(named: 'releaseId'),
               arch: any(named: 'arch'),
               platform: any(named: 'platform'),
+              onDownloadProgress: any(named: 'onDownloadProgress'),
             ),
           ).thenAnswer((_) async => []);
 
@@ -1406,6 +1426,7 @@ Please bump your version number and try again.''',
               releaseId: any(named: 'releaseId'),
               arch: any(named: 'arch'),
               platform: any(named: 'platform'),
+              onDownloadProgress: any(named: 'onDownloadProgress'),
             ),
           ).thenAnswer((_) async => [releaseArtifact]);
 
@@ -1419,7 +1440,9 @@ Please bump your version number and try again.''',
           );
 
           expect(result, releaseArtifact);
-          verify(() => progress.complete()).called(1);
+          verify(
+            () => progress.complete('Fetching ${arch.arch} artifact (cached)'),
+          ).called(1);
         });
       });
 
@@ -1456,6 +1479,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenAnswer((_) async {});
         });
@@ -1494,6 +1519,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenThrow(error);
           setUpProjectRoot();
@@ -1527,6 +1554,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenThrow(error);
           setUpProjectRoot();
@@ -1562,6 +1591,8 @@ Please bump your version number and try again.''',
                 hash: any(named: 'hash'),
                 canSideload: any(named: 'canSideload'),
                 podfileLockHash: any(named: 'podfileLockHash'),
+
+                onUploadProgress: any(named: 'onUploadProgress'),
               ),
             ).thenThrow(const CodePushConflictException(message: error));
             setUpProjectRoot();
@@ -1598,6 +1629,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenThrow(const CodePushConflictException(message: error));
           setUpProjectRoot();
@@ -1632,6 +1665,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenAnswer((_) async {});
           setUpProjectRoot();
@@ -1663,6 +1698,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenAnswer((_) async {});
           setUpProjectRoot(flavor: flavorName);
@@ -1692,6 +1729,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: null,
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).called(Arch.values.length);
           verify(() => progress.complete()).called(1);
@@ -1743,6 +1782,8 @@ Please bump your version number and try again.''',
                 hash: any(named: 'hash'),
                 canSideload: any(named: 'canSideload'),
                 podfileLockHash: any(named: 'podfileLockHash'),
+
+                onUploadProgress: any(named: 'onUploadProgress'),
               ),
             ).called(expectedUploads);
             verifyNever(
@@ -1755,6 +1796,8 @@ Please bump your version number and try again.''',
                 hash: any(named: 'hash'),
                 canSideload: any(named: 'canSideload'),
                 podfileLockHash: any(named: 'podfileLockHash'),
+
+                onUploadProgress: any(named: 'onUploadProgress'),
               ),
             );
             verify(() => progress.complete()).called(1);
@@ -1816,6 +1859,8 @@ Please bump your version number and try again.''',
                 hash: any(named: 'hash'),
                 canSideload: any(named: 'canSideload'),
                 podfileLockHash: any(named: 'podfileLockHash'),
+
+                onUploadProgress: any(named: 'onUploadProgress'),
               ),
             );
           },
@@ -1874,6 +1919,8 @@ Please bump your version number and try again.''',
                 hash: any(named: 'hash'),
                 canSideload: any(named: 'canSideload'),
                 podfileLockHash: any(named: 'podfileLockHash'),
+
+                onUploadProgress: any(named: 'onUploadProgress'),
               ),
             ).called(3);
             verify(() => progress.complete()).called(1);
@@ -1902,6 +1949,8 @@ Please bump your version number and try again.''',
                 hash: any(named: 'hash'),
                 canSideload: any(named: 'canSideload'),
                 podfileLockHash: any(named: 'podfileLockHash'),
+
+                onUploadProgress: any(named: 'onUploadProgress'),
               ),
             ).thenThrow(
               const CodePushConflictException(message: 'already exists'),
@@ -1939,6 +1988,8 @@ Please bump your version number and try again.''',
                 hash: any(named: 'hash'),
                 canSideload: any(named: 'canSideload'),
                 podfileLockHash: any(named: 'podfileLockHash'),
+
+                onUploadProgress: any(named: 'onUploadProgress'),
               ),
             ).thenThrow(Exception('something went wrong'));
           });
@@ -1972,6 +2023,8 @@ Please bump your version number and try again.''',
                 hash: any(named: 'hash'),
                 canSideload: any(named: 'canSideload'),
                 podfileLockHash: any(named: 'podfileLockHash'),
+
+                onUploadProgress: any(named: 'onUploadProgress'),
               ),
             ).thenAnswer((_) async {});
           });
@@ -1998,6 +2051,8 @@ Please bump your version number and try again.''',
                 hash: any(named: 'hash'),
                 canSideload: true,
                 podfileLockHash: null,
+
+                onUploadProgress: any(named: 'onUploadProgress'),
               ),
             ).called(1);
           });
@@ -2046,6 +2101,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenAnswer((_) async {});
         });
@@ -2062,6 +2119,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenThrow(error);
           setUpProjectRoot();
@@ -2096,6 +2155,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenThrow(error);
           setUpProjectRoot();
@@ -2132,6 +2193,8 @@ Please bump your version number and try again.''',
                 hash: any(named: 'hash'),
                 canSideload: any(named: 'canSideload'),
                 podfileLockHash: any(named: 'podfileLockHash'),
+
+                onUploadProgress: any(named: 'onUploadProgress'),
               ),
             ).thenThrow(const CodePushConflictException(message: error));
             setUpProjectRoot();
@@ -2169,6 +2232,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenThrow(const CodePushConflictException(message: error));
           setUpProjectRoot();
@@ -2204,6 +2269,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenAnswer((_) async {});
           setUpProjectRoot();
@@ -2236,6 +2303,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenAnswer((_) async {});
           setUpProjectRoot(flavor: flavorName);
@@ -2262,6 +2331,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: null,
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).called(Arch.values.length + 1);
           verify(() => progress.complete()).called(1);
@@ -2295,6 +2366,8 @@ Please bump your version number and try again.''',
             hash: any(named: 'hash'),
             canSideload: any(named: 'canSideload'),
             podfileLockHash: any(named: 'podfileLockHash'),
+
+            onUploadProgress: any(named: 'onUploadProgress'),
           ),
         ).thenAnswer((_) async {});
       });
@@ -2316,6 +2389,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenThrow(error);
           setUpProjectRoot();
@@ -2355,6 +2430,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenThrow(const CodePushConflictException(message: error));
           setUpProjectRoot();
@@ -2394,6 +2471,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenThrow(error);
           setUpProjectRoot();
@@ -2427,6 +2506,8 @@ Please bump your version number and try again.''',
             hash: any(named: 'hash'),
             canSideload: any(named: 'canSideload'),
             podfileLockHash: any(named: 'podfileLockHash'),
+
+            onUploadProgress: any(named: 'onUploadProgress'),
           ),
         ).thenAnswer((_) async {});
         setUpProjectRoot();
@@ -2457,6 +2538,8 @@ Please bump your version number and try again.''',
             hash: any(named: 'hash'),
             canSideload: any(named: 'canSideload'),
             podfileLockHash: podfileLockHash,
+
+            onUploadProgress: any(named: 'onUploadProgress'),
           ),
         ).called(1);
       });
@@ -2483,6 +2566,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenThrow(Exception('something went wrong'));
         });
@@ -2515,6 +2600,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenAnswer((_) async {});
         });
@@ -2540,6 +2627,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: true,
               podfileLockHash: null,
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).called(1);
         });
@@ -2566,6 +2655,8 @@ Please bump your version number and try again.''',
             hash: any(named: 'hash'),
             canSideload: any(named: 'canSideload'),
             podfileLockHash: any(named: 'podfileLockHash'),
+
+            onUploadProgress: any(named: 'onUploadProgress'),
           ),
         ).thenAnswer((_) async {});
         when(
@@ -2591,6 +2682,8 @@ Please bump your version number and try again.''',
             hash: any(named: 'hash'),
             canSideload: any(named: 'canSideload'),
             podfileLockHash: any(named: 'podfileLockHash'),
+
+            onUploadProgress: any(named: 'onUploadProgress'),
           ),
         ).thenThrow(Exception('oh no'));
 
@@ -2644,6 +2737,8 @@ Please bump your version number and try again.''',
             hash: any(named: 'hash'),
             canSideload: any(named: 'canSideload'),
             podfileLockHash: any(named: 'podfileLockHash'),
+
+            onUploadProgress: any(named: 'onUploadProgress'),
           ),
         ).thenAnswer((_) async {});
         setUpProjectRoot();
@@ -2662,6 +2757,8 @@ Please bump your version number and try again.''',
               hash: any(named: 'hash'),
               canSideload: any(named: 'canSideload'),
               podfileLockHash: any(named: 'podfileLockHash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenThrow(Exception('oh no'));
 
@@ -2706,11 +2803,21 @@ Please bump your version number and try again.''',
             appId: any(named: 'appId'),
             releaseId: any(named: 'releaseId'),
             platform: any(named: 'platform'),
+
+            onDownloadProgress: any(named: 'onDownloadProgress'),
           ),
         ).thenAnswer((_) async => [releaseArtifact]);
         when(
-          () => artifactManager.downloadFile(any()),
-        ).thenAnswer((_) async => downloadedArtifact);
+          () => artifactManager.startFileDownload(any()),
+        ).thenAnswer(
+          (_) async => FileDownload(
+            file: Future.value(downloadedArtifact),
+            progress: Stream.value(
+              const DownloadProgress(downloadedBytes: 4, totalBytes: 4),
+            ),
+            totalBytes: 4,
+          ),
+        );
         when(
           () => codePushClient.createReleaseArtifact(
             appId: any(named: 'appId'),
@@ -2721,6 +2828,8 @@ Please bump your version number and try again.''',
             hash: any(named: 'hash'),
             canSideload: any(named: 'canSideload'),
             podfileLockHash: any(named: 'podfileLockHash'),
+
+            onUploadProgress: any(named: 'onUploadProgress'),
           ),
         ).thenAnswer((_) async {});
       });
@@ -2740,11 +2849,18 @@ Please bump your version number and try again.''',
             appId: app.appId,
             releaseId: releaseId,
             platform: releasePlatform,
+
+            onDownloadProgress: any(named: 'onDownloadProgress'),
           ),
         ).called(1);
         verify(
-          () => artifactManager.downloadFile(Uri.parse(releaseArtifact.url)),
+          () => artifactManager.startFileDownload(
+            Uri.parse(releaseArtifact.url),
+          ),
         ).called(1);
+        verify(
+          () => progress.update(any(that: contains('Downloading'))),
+        ).called(greaterThanOrEqualTo(1));
         verify(
           () => codePushClient.createReleaseArtifact(
             appId: app.appId,
@@ -2755,6 +2871,8 @@ Please bump your version number and try again.''',
             hash: any(named: 'hash'),
             canSideload: releaseArtifact.canSideload,
             podfileLockHash: releaseArtifact.podfileLockHash,
+
+            onUploadProgress: any(named: 'onUploadProgress'),
           ),
         ).called(1);
       });
@@ -2765,6 +2883,8 @@ Please bump your version number and try again.''',
             appId: any(named: 'appId'),
             releaseId: any(named: 'releaseId'),
             platform: any(named: 'platform'),
+
+            onDownloadProgress: any(named: 'onDownloadProgress'),
           ),
         ).thenAnswer((_) async => []);
 
@@ -2780,6 +2900,93 @@ Please bump your version number and try again.''',
           exitsWithCode(ExitCode.software),
         );
       });
+
+      test('reports byte progress when cloning patched package', () async {
+        const artifactHash = 'abc123hash';
+        when(
+          () => codePushClient.lookupBaselinesByArtifactHash(
+            artifactHash: artifactHash,
+            appId: app.appId,
+            platform: releasePlatform.name,
+          ),
+        ).thenAnswer(
+          (_) async => {
+            'package': {
+              'number': 3,
+              'arch': 'xcframework',
+              'artifact_path': 'patches/xcframework.bin',
+            },
+            'related_packages': [
+              {
+                'number': 3,
+                'arch': 'xcframework',
+                'artifact_path': 'patches/xcframework.bin',
+              },
+            ],
+          },
+        );
+        when(
+          () => codePushClient.downloadAdminArtifact(
+            any(),
+            onDownloadProgress: any(named: 'onDownloadProgress'),
+          ),
+        ).thenAnswer((invocation) async {
+          final onProgress =
+              invocation.namedArguments[#onDownloadProgress]
+                  as void Function(ArtifactDownloadProgress)?;
+          onProgress?.call(
+            const ArtifactDownloadProgress(
+              label: 'xcframework.bin',
+              receivedBytes: 512,
+              totalBytes: 1024,
+            ),
+          );
+          onProgress?.call(
+            const ArtifactDownloadProgress(
+              label: 'xcframework.bin',
+              receivedBytes: 1024,
+              totalBytes: 1024,
+            ),
+          );
+          return downloadedArtifact;
+        });
+
+        await runWithOverrides(
+          () => codePushClientWrapper.cloneReleaseArtifacts(
+            appId: app.appId,
+            sourceReleaseId: releaseId,
+            targetReleaseId: targetReleaseId,
+            platform: releasePlatform,
+            artifactHash: artifactHash,
+          ),
+        );
+
+        verify(
+          () => logger.progress('Cloning patched package artifact(s)'),
+        ).called(1);
+        verify(
+          () => progress.update(any(that: contains('Downloading xcframework'))),
+        ).called(greaterThanOrEqualTo(1));
+        verify(
+          () => codePushClient.downloadAdminArtifact(
+            'patches/xcframework.bin',
+            onDownloadProgress: any(named: 'onDownloadProgress'),
+          ),
+        ).called(1);
+        verify(
+          () => codePushClient.createReleaseArtifact(
+            appId: app.appId,
+            releaseId: targetReleaseId,
+            artifactPath: downloadedArtifact.path,
+            arch: 'xcframework',
+            platform: releasePlatform,
+            hash: any(named: 'hash'),
+            canSideload: false,
+            podfileLockHash: null,
+            onUploadProgress: any(named: 'onUploadProgress'),
+          ),
+        ).called(1);
+      });
     });
 
     group('cloneReleaseBaselines', () {
@@ -2790,7 +2997,12 @@ Please bump your version number and try again.''',
         jsonEncode({
           'version': 2,
           'files': [
-            {'path': 'lib/main.dart', 'hash': 'abc', 'size': 1, 'category': 'flutter_dart'},
+            {
+              'path': 'lib/main.dart',
+              'hash': 'abc',
+              'size': 1,
+              'category': 'flutter_dart',
+            },
           ],
         }),
       );
@@ -2889,8 +3101,23 @@ Please bump your version number and try again.''',
           ],
         );
         when(
-          () => codePushClient.getOtaSnapshotContent('snap-new'),
-        ).thenAnswer((_) async => snapshotBytes);
+          () => codePushClient.getOtaSnapshotContent(
+            'snap-new',
+            onDownloadProgress: any(named: 'onDownloadProgress'),
+          ),
+        ).thenAnswer((invocation) async {
+          final onProgress =
+              invocation.namedArguments[#onDownloadProgress]
+                  as void Function(ArtifactDownloadProgress)?;
+          onProgress?.call(
+            ArtifactDownloadProgress(
+              label: 'snapshot',
+              receivedBytes: snapshotBytes.length,
+              totalBytes: snapshotBytes.length,
+            ),
+          );
+          return snapshotBytes;
+        });
         when(
           () => codePushClient.uploadOtaSnapshot(
             appId: any(named: 'appId'),
@@ -2900,6 +3127,7 @@ Please bump your version number and try again.''',
             channel: any(named: 'channel'),
             notes: any(named: 'notes'),
             fileCount: any(named: 'fileCount'),
+            onUploadProgress: any(named: 'onUploadProgress'),
           ),
         ).thenAnswer((_) async => {'id': 'snap-cloned', 'number': 1});
 
@@ -2920,8 +3148,23 @@ Please bump your version number and try again.''',
           ],
         );
         when(
-          () => codePushClient.getResourceSnapshotContent('res-1'),
-        ).thenAnswer((_) async => resourceBytes);
+          () => codePushClient.getResourceSnapshotContent(
+            'res-1',
+            onDownloadProgress: any(named: 'onDownloadProgress'),
+          ),
+        ).thenAnswer((invocation) async {
+          final onProgress =
+              invocation.namedArguments[#onDownloadProgress]
+                  as void Function(ArtifactDownloadProgress)?;
+          onProgress?.call(
+            ArtifactDownloadProgress(
+              label: 'resource',
+              receivedBytes: resourceBytes.length,
+              totalBytes: resourceBytes.length,
+            ),
+          );
+          return resourceBytes;
+        });
         when(
           () => codePushClient.uploadResourceSnapshot(
             appId: any(named: 'appId'),
@@ -2931,6 +3174,7 @@ Please bump your version number and try again.''',
             channel: any(named: 'channel'),
             notes: any(named: 'notes'),
             resourceCount: any(named: 'resourceCount'),
+            onUploadProgress: any(named: 'onUploadProgress'),
           ),
         ).thenAnswer((_) async => {'id': 'res-cloned', 'number': 1});
 
@@ -2944,8 +3188,14 @@ Please bump your version number and try again.''',
         );
 
         verify(
-          () => codePushClient.getOtaSnapshotContent('snap-new'),
+          () => codePushClient.getOtaSnapshotContent(
+            'snap-new',
+            onDownloadProgress: any(named: 'onDownloadProgress'),
+          ),
         ).called(1);
+        verify(
+          () => progress.update(any(that: contains('Downloading snapshot'))),
+        ).called(greaterThanOrEqualTo(1));
         verify(
           () => codePushClient.uploadOtaSnapshot(
             appId: app.appId,
@@ -2955,6 +3205,7 @@ Please bump your version number and try again.''',
             channel: 'stable',
             notes: 'Cloned from $sourceVersion',
             fileCount: 1,
+            onUploadProgress: any(named: 'onUploadProgress'),
           ),
         ).called(1);
 
@@ -2968,6 +3219,7 @@ Please bump your version number and try again.''',
                     channel: 'stable',
                     notes: 'Cloned from $sourceVersion',
                     resourceCount: 1,
+                    onUploadProgress: any(named: 'onUploadProgress'),
                   ),
                 ).captured.single
                 as List<int>;
@@ -2998,7 +3250,10 @@ Please bump your version number and try again.''',
           ],
         );
         when(
-          () => codePushClient.getOtaSnapshotContent('snap-1'),
+          () => codePushClient.getOtaSnapshotContent(
+            'snap-1',
+            onDownloadProgress: any(named: 'onDownloadProgress'),
+          ),
         ).thenAnswer((_) async => snapshotBytes);
         when(
           () => codePushClient.uploadOtaSnapshot(
@@ -3009,6 +3264,7 @@ Please bump your version number and try again.''',
             channel: any(named: 'channel'),
             notes: any(named: 'notes'),
             fileCount: any(named: 'fileCount'),
+            onUploadProgress: any(named: 'onUploadProgress'),
           ),
         ).thenThrow(Exception('upload failed'));
 
@@ -3022,7 +3278,9 @@ Please bump your version number and try again.''',
         );
 
         verify(
-          () => progress.fail(any(that: contains('Failed to clone OTA baselines'))),
+          () => progress.fail(
+            any(that: contains('Failed to clone OTA baselines')),
+          ),
         ).called(1);
       });
     });
@@ -3422,6 +3680,8 @@ Please bump your version number and try again.''',
               arch: any(named: 'arch'),
               platform: any(named: 'platform'),
               hash: any(named: 'hash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenThrow(error);
 
@@ -3449,6 +3709,8 @@ Please bump your version number and try again.''',
               arch: any(named: 'arch'),
               platform: any(named: 'platform'),
               hash: any(named: 'hash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenAnswer((_) async {});
 
@@ -3470,6 +3732,8 @@ Please bump your version number and try again.''',
               arch: arch.arch,
               platform: releasePlatform,
               hash: patchArtifactBundle.hash,
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).called(1);
         });
@@ -3492,6 +3756,8 @@ Please bump your version number and try again.''',
               arch: any(named: 'arch'),
               platform: any(named: 'platform'),
               hash: any(named: 'hash'),
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).thenAnswer((_) async {});
           when(
@@ -3533,6 +3799,8 @@ Please bump your version number and try again.''',
               arch: arch.arch,
               platform: releasePlatform,
               hash: patchArtifactBundle.hash,
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).called(1);
           verify(() => codePushClient.getChannels(appId: appId)).called(1);
@@ -3589,6 +3857,8 @@ Please bump your version number and try again.''',
               arch: arch.arch,
               platform: releasePlatform,
               hash: patchArtifactBundle.hash,
+
+              onUploadProgress: any(named: 'onUploadProgress'),
             ),
           ).called(1);
           verify(() => codePushClient.getChannels(appId: appId)).called(1);

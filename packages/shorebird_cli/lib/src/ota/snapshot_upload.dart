@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
+import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/ota/check_ota.dart';
 import 'package:shorebird_code_push_client/shorebird_code_push_client.dart';
 
@@ -94,6 +95,9 @@ Future<Map<String, dynamic>> uploadReleaseSnapshot(
     '==> snapshot: $snapshotFile (${bytes.length} bytes, hash=$hash)',
   );
 
+  final progressUpdater = ByteProgressUpdater(
+    onUpdate: (message) => stderr.writeln('==> $message'),
+  );
   final created = await opts.client.uploadOtaSnapshot(
     appId: opts.appId,
     releaseVersion: opts.releaseVersion,
@@ -105,6 +109,13 @@ Future<Map<String, dynamic>> uploadReleaseSnapshot(
     origin: opts.origin,
     patchNumber: opts.patchNumber,
     artifactHash: opts.artifactHash,
+    onUploadProgress: (event) {
+      progressUpdater.report(
+        label: 'Uploading ${event.label}',
+        receivedBytes: event.sentBytes,
+        totalBytes: event.totalBytes,
+      );
+    },
   );
   stdout.writeln(const JsonEncoder.withIndent('  ').convert(created));
   stdout.writeln(

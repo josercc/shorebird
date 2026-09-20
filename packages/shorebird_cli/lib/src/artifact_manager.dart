@@ -24,19 +24,73 @@ ArtifactManager get artifactManager => read(artifactManagerRef);
 /// A callback that reports progress as a double between 0 and 1.
 typedef ProgressCallback = void Function(double progress);
 
+/// {@template download_progress}
+/// Byte-level progress for a single download.
+/// {@endtemplate}
+class DownloadProgress {
+  /// {@macro download_progress}
+  const DownloadProgress({
+    required this.downloadedBytes,
+    this.totalBytes,
+  });
+
+  /// Bytes received so far.
+  final int downloadedBytes;
+
+  /// Total size from `Content-Length`, when the server provides it.
+  final int? totalBytes;
+
+  /// Fraction complete in `[0, 1]`, or `null` when [totalBytes] is unknown.
+  double? get fraction {
+    final total = totalBytes;
+    if (total == null || total <= 0) return null;
+    return downloadedBytes / total;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is DownloadProgress &&
+        other.downloadedBytes == downloadedBytes &&
+        other.totalBytes == totalBytes;
+  }
+
+  @override
+  int get hashCode => Object.hash(downloadedBytes, totalBytes);
+
+  @override
+  String toString() =>
+      'DownloadProgress(downloadedBytes: $downloadedBytes, '
+      'totalBytes: $totalBytes)';
+}
+
+/// Builds a progress label like `Downloading aar 1.2 MB / 4.5 MB (27%)`.
+String formatDownloadProgressMessage(
+  String message,
+  DownloadProgress progress,
+) {
+  return '$message ${formatByteProgress(progress.downloadedBytes, progress.totalBytes)}';
+}
+
 /// {@template file_download}
 /// Used to monitor the progress of a file download and retrieve the file once
 /// it has been downloaded.
 /// {@endtemplate}
 class FileDownload {
   /// {@macro file_download}
-  FileDownload({required this.file, required this.progress});
+  FileDownload({
+    required this.file,
+    required this.progress,
+    this.totalBytes,
+  });
 
   /// The file that is being downloaded. Await this to get the downloaded file.
   final Future<File> file;
 
-  /// The progress of the download as a stream of doubles between 0 and 1.
-  final Stream<double> progress;
+  /// Byte-level download progress updates.
+  final Stream<DownloadProgress> progress;
+
+  /// Total size from `Content-Length`, when known up front.
+  final int? totalBytes;
 }
 
 /// Manages artifacts for the Shorebird CLI.
@@ -103,9 +157,13 @@ class ArtifactManager {
         final tempDir = await Directory.systemTemp.createTemp();
         outFile = await source.copy(p.join(tempDir.path, 'artifact'));
       }
+      final size = outFile.lengthSync();
       return FileDownload(
         file: Future.value(outFile),
-        progress: const Stream<double>.empty(),
+        progress: Stream.value(
+          DownloadProgress(downloadedBytes: size, totalBytes: size),
+        ),
+        totalBytes: size,
       );
     }
 
@@ -125,22 +183,23 @@ class ArtifactManager {
       final tempDir = await Directory.systemTemp.createTemp();
       outFile = File(p.join(tempDir.path, 'artifact'));
     }
-    final progressStreamController = StreamController<double>();
+    final totalBytes = response.contentLength;
+    final progressStreamController = StreamController<DownloadProgress>();
 
     Future<File> writeStreamedResponseToFile() async {
       final ioSink = outFile.openWrite();
       try {
         var downloadedBytes = 0;
-        final totalBytes = response.contentLength;
         await for (final chunk in response.stream) {
           ioSink.add(chunk);
           downloadedBytes += chunk.length;
-          if (totalBytes == null) {
-            continue;
-          }
-
           if (progressStreamController.hasListener) {
-            progressStreamController.add(downloadedBytes / totalBytes);
+            progressStreamController.add(
+              DownloadProgress(
+                downloadedBytes: downloadedBytes,
+                totalBytes: totalBytes,
+              ),
+            );
           }
         }
       } finally {
@@ -156,14 +215,16 @@ class ArtifactManager {
     return FileDownload(
       file: writeStreamedResponseToFile(),
       progress: progressStreamController.stream,
+      totalBytes: totalBytes,
     );
   }
 
   /// Downloads the file at the given [uri] to a temporary location and logs
-  /// progress updates as "[message] (XX%)". Progress updates happen at most
-  /// once every 250 milliseconds. If the download fails, the progress message
-  /// will be updated to "[message] failed: Exception", where "Exception" is the
-  /// error message.
+  /// progress updates as "[message] (downloaded / total, XX%)" when the server
+  /// provides `Content-Length`, or "[message] (downloaded)" otherwise.
+  /// Progress updates happen at most once every 250 milliseconds. If the
+  /// download fails, the progress message will be updated to
+  /// "[message] failed: Exception", where "Exception" is the error message.
   ///
   /// Returns the downloaded [File].
   Future<File> downloadWithProgressUpdates(
@@ -180,13 +241,19 @@ class ArtifactManager {
           .throttle(throttleDuration, trailing: true)
           .listen((progress) {
             downloadProgress.update(
-              '$message (${(progress * 100).toStringAsFixed(0)}%)',
+              formatDownloadProgressMessage(message, progress),
             );
           });
 
       artifactFile = await download.file;
       await subscription.cancel();
-      downloadProgress.complete('$message (100%)');
+      final total = download.totalBytes ?? artifactFile.lengthSync();
+      downloadProgress.complete(
+        formatDownloadProgressMessage(
+          message,
+          DownloadProgress(downloadedBytes: total, totalBytes: total),
+        ),
+      );
     } catch (e) {
       downloadProgress.fail('$message failed: $e');
       rethrow;
