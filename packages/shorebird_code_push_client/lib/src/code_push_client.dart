@@ -134,12 +134,14 @@ class _CachedRelease {
     required this.version,
     required this.flutterRevision,
     this.flutterVersion,
+    this.tags,
   });
 
   final String appId;
   final String version;
   final String flutterRevision;
   final String? flutterVersion;
+  final List<String>? tags;
   final Map<String, ReleaseArtifact> artifacts = {};
 }
 
@@ -894,6 +896,7 @@ class CodePushClient {
     required String flutterRevision,
     String? flutterVersion,
     String? displayName,
+    List<String>? tags,
   }) async {
     final id = _nextId++;
     _releases[id] = _CachedRelease(
@@ -901,6 +904,7 @@ class CodePushClient {
       version: version,
       flutterRevision: flutterRevision,
       flutterVersion: flutterVersion,
+      tags: tags,
     );
     final now = DateTime.now().toUtc();
     return Release(
@@ -914,6 +918,44 @@ class CodePushClient {
       createdAt: now,
       updatedAt: now,
     );
+  }
+
+  /// Attach [tags] to a locally cached release so subsequent
+  /// [createReleaseArtifact] POSTs include them. Also PATCHes the control
+  /// plane so existing releases get labeled without re-upload.
+  Future<void> setReleaseTags({
+    required String appId,
+    required int releaseId,
+    required List<String> tags,
+    String? releaseVersion,
+  }) async {
+    final cached = _releases[releaseId];
+    if (cached != null) {
+      final next = _CachedRelease(
+        appId: cached.appId,
+        version: cached.version,
+        flutterRevision: cached.flutterRevision,
+        flutterVersion: cached.flutterVersion,
+        tags: tags,
+      );
+      next.artifacts.addAll(cached.artifacts);
+      _releases[releaseId] = next;
+    }
+    final version = (cached?.version ?? releaseVersion)?.trim() ?? '';
+    if (version.isEmpty) {
+      throw CodePushException(
+        message: 'Cannot set tags: unknown release version for id $releaseId',
+      );
+    }
+    final response = await _httpClient.patch(
+      Uri.parse(
+        '$_admin/releases?app_id=${Uri.encodeComponent(appId)}'
+        '&version=${Uri.encodeComponent(version)}',
+      ),
+      headers: {'content-type': 'application/json'},
+      body: json.encode({'tags': tags}),
+    );
+    if (!response.isSuccess) _throw(response);
   }
 
   /// No-op on control_api (releases are active once registered).
@@ -973,6 +1015,7 @@ class CodePushClient {
           'flutter_revision': cached.flutterRevision,
         if (cached.flutterVersion != null && cached.flutterVersion!.isNotEmpty)
           'flutter_version': cached.flutterVersion,
+        if (cached.tags != null && cached.tags!.isNotEmpty) 'tags': cached.tags,
       }),
     );
     if (!register.isSuccess) _throw(register);
@@ -1194,6 +1237,7 @@ class CodePushClient {
         version: entry.key,
         flutterRevision: release.flutterRevision,
         flutterVersion: release.flutterVersion,
+        tags: cached?.tags,
       );
       // Preserve any artifacts already cached for this synthetic id.
       if (cached != null) {

@@ -160,6 +160,13 @@ number (origin=patch), then register them as release baselines on the new
 version.''',
       )
       ..addMultiOption(
+        'tags',
+        help: '''
+Custom labels for this release on the control plane (e.g. prod, test).
+Comma-separated. Synced across platforms for the same --release-version.
+Used by metax: market package → prod, otherwise → test.''',
+      )
+      ..addMultiOption(
         'target-platform',
         help: 'The target platform(s) for which the app is compiled.',
         defaultsTo: Arch.values.map((arch) => arch.targetPlatformCliArg),
@@ -292,6 +299,22 @@ version.''',
 
   /// Existing release version to clone artifacts from, if provided.
   String? get fromReleaseVersion => results['from-release'] as String?;
+
+  /// Control-plane labels for this release (e.g. `prod`, `test`).
+  List<String>? get releaseTags {
+    if (!results.wasParsed('tags')) return null;
+    final raw = results['tags'] as List<String>? ?? const <String>[];
+    final tags = <String>[];
+    final seen = <String>{};
+    for (final entry in raw) {
+      final tag = entry.trim();
+      if (tag.isEmpty) continue;
+      final key = tag.toLowerCase();
+      if (!seen.add(key)) continue;
+      tags.add(tag);
+    }
+    return tags;
+  }
 
   /// Optional full-binary hash used to resolve OTA baselines when cloning.
   String? get artifactHash {
@@ -806,6 +829,7 @@ To resolve this issue, you can:
     final flutterVersionString =
         flutterVersionDisplay ??
         await shorebirdFlutter.getVersionAndRevision();
+    final tags = releaseTags;
     // TODO(bryanoltman): include archs in the summary for android
     // (and other platforms?)
     final summary = [
@@ -816,6 +840,8 @@ To resolve this issue, you can:
         '🧬 Cloned From: ${lightCyan.wrap(fromReleaseVersion)}',
       '🕹️  Platform: ${lightCyan.wrap(releasePlatform.name)}',
       '🐦 Flutter Version: ${lightCyan.wrap(flutterVersionString)}',
+      if (tags != null && tags.isNotEmpty)
+        '🏷️  Tags: ${lightCyan.wrap(tags.join(', '))}',
     ];
 
     logger.info('''
@@ -839,16 +865,31 @@ ${summary.join('\n')}
     required String version,
     required ReleasePlatform releasePlatform,
   }) async {
-    return await codePushClientWrapper.maybeGetRelease(
-          appId: appId,
-          releaseVersion: version,
-        ) ??
+    final tags = releaseTags;
+    final existing = await codePushClientWrapper.maybeGetRelease(
+      appId: appId,
+      releaseVersion: version,
+    );
+    final release =
+        existing ??
         await codePushClientWrapper.createRelease(
           appId: appId,
           version: version,
           flutterRevision: shorebirdEnv.flutterRevision,
           platform: releasePlatform,
+          tags: tags,
         );
+    // Existing server rows: PATCH tags now. New releases carry tags on the
+    // local cache and send them with createReleaseArtifact POSTs.
+    if (tags != null && existing != null) {
+      await codePushClientWrapper.setReleaseTags(
+        appId: appId,
+        releaseId: release.id,
+        tags: tags,
+        releaseVersion: version,
+      );
+    }
+    return release;
   }
 
   /// Prepares the release by updating the release status to draft.

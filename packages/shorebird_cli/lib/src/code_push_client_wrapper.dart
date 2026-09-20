@@ -401,6 +401,7 @@ Please create a release using "flutterpatch release" and try again.
     required String version,
     required String flutterRevision,
     required ReleasePlatform platform,
+    List<String>? tags,
   }) async {
     final createReleaseProgress = logger.progress('Creating release');
     final flutterVersion = await shorebirdFlutter.getVersionForRevision(
@@ -412,6 +413,7 @@ Please create a release using "flutterpatch release" and try again.
         version: version,
         flutterRevision: flutterRevision,
         flutterVersion: flutterVersion,
+        tags: tags,
       );
       await codePushClient.updateReleaseStatus(
         appId: appId,
@@ -423,6 +425,27 @@ Please create a release using "flutterpatch release" and try again.
       return release;
     } catch (error) {
       _handleErrorAndExit(error, progress: createReleaseProgress);
+    }
+  }
+
+  /// Label a release with control-plane tags (e.g. `prod` / `test`).
+  Future<void> setReleaseTags({
+    required String appId,
+    required int releaseId,
+    required List<String> tags,
+    String? releaseVersion,
+  }) async {
+    final progress = logger.progress('Setting release tags');
+    try {
+      await codePushClient.setReleaseTags(
+        appId: appId,
+        releaseId: releaseId,
+        tags: tags,
+        releaseVersion: releaseVersion,
+      );
+      progress.complete();
+    } catch (error) {
+      _handleErrorAndExit(error, progress: progress);
     }
   }
 
