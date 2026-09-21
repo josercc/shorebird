@@ -146,6 +146,8 @@ environment:
       when(() => shorebirdEnv.hasShorebirdYaml).thenReturn(false);
       when(() => shorebirdEnv.pubspecContainsShorebirdYaml).thenReturn(false);
       when(() => shorebirdEnv.canAcceptUserInput).thenReturn(true);
+      // Avoid base_url prompts; most tests focus on app creation / yaml writes.
+      when(() => argResults['base-url']).thenReturn('http://127.0.0.1:8080');
       when(
         () => shorebirdValidator.validatePreconditions(
           checkUserIsAuthenticated: any(named: 'checkUserIsAuthenticated'),
@@ -198,59 +200,81 @@ Please make sure you are running "flutterpatch init" from within your Flutter pr
       expect(exitCode, ExitCode.software.code);
     });
 
-    test('throws software error when shorebird.yaml already exists', () async {
+    test('skips app creation when shorebird.yaml already exists', () async {
       when(() => shorebirdEnv.hasShorebirdYaml).thenReturn(true);
+      when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(shorebirdYaml);
+      when(() => shorebirdYaml.appId).thenReturn(appId);
+      when(() => shorebirdYaml.baseUrl).thenReturn('http://127.0.0.1:8080');
+      when(() => shorebirdYaml.flavors).thenReturn(null);
       final exitCode = await runWithOverrides(command.run);
       verify(
-        () => logger.err(
-          'A "shorebird.yaml" file already exists and seems up-to-date.',
-        ),
-      ).called(1);
-      verify(
         () => logger.info(
-          '''If you want to reinitialize Shorebird, please run ${lightCyan.wrap('flutterpatch init --force')}.''',
+          any(
+            that: contains(
+              'A "shorebird.yaml" file already exists and seems up-to-date.',
+            ),
+          ),
         ),
       ).called(1);
-      expect(exitCode, ExitCode.software.code);
+      verifyNever(
+        () => codePushClientWrapper.createApp(
+          appName: any(named: 'appName'),
+          organizationId: any(named: 'organizationId'),
+        ),
+      );
+      verifyNever(() => shorebirdYamlFile.writeAsStringSync(any()));
+      verify(() => pubspecEditor.addShorebirdYamlToPubspecAssets()).called(1);
+      expect(
+        File(
+          p.join(projectRoot.path, '.flutterpatch-supported-resources'),
+        ).existsSync(),
+        isTrue,
+      );
+      expect(exitCode, ExitCode.success.code);
     });
 
     test(
-      'shows up-to-date error when yaml exists without flavors '
+      'skips app creation when yaml exists without flavors '
       'and no flavors detected',
       () async {
         when(() => shorebirdEnv.hasShorebirdYaml).thenReturn(true);
         when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(shorebirdYaml);
         when(() => shorebirdYaml.appId).thenReturn(appId);
+        when(() => shorebirdYaml.baseUrl).thenReturn('http://127.0.0.1:8080');
         when(() => shorebirdYaml.flavors).thenReturn(null);
         // Default setUp has no product flavors (gradlew returns empty set).
         final exitCode = await runWithOverrides(command.run);
-        verify(
-          () => logger.err(
-            'A "shorebird.yaml" file already exists and seems up-to-date.',
+        verifyNever(
+          () => codePushClientWrapper.createApp(
+            appName: any(named: 'appName'),
+            organizationId: any(named: 'organizationId'),
           ),
-        ).called(1);
-        expect(exitCode, ExitCode.software.code);
+        );
+        expect(exitCode, ExitCode.success.code);
       },
     );
 
     test(
-      'shows up-to-date error when yaml exists with flavors '
+      'skips app creation when yaml exists with flavors '
       'and no new flavors detected',
       () async {
         when(() => shorebirdEnv.hasShorebirdYaml).thenReturn(true);
         when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(shorebirdYaml);
         when(() => shorebirdYaml.appId).thenReturn(appId);
+        when(() => shorebirdYaml.baseUrl).thenReturn('http://127.0.0.1:8080');
         when(() => shorebirdYaml.flavors).thenReturn({'dev': 'id-1'});
         when(
           () => gradlew.productFlavors(any()),
         ).thenAnswer((_) async => {'dev'});
         final exitCode = await runWithOverrides(command.run);
-        verify(
-          () => logger.err(
-            'A "shorebird.yaml" file already exists and seems up-to-date.',
+        verifyNever(
+          () => codePushClientWrapper.createApp(
+            appName: any(named: 'appName'),
+            organizationId: any(named: 'organizationId'),
           ),
-        ).called(1);
-        expect(exitCode, ExitCode.software.code);
+        );
+        verifyNever(() => shorebirdYamlFile.writeAsStringSync(any()));
+        expect(exitCode, ExitCode.success.code);
       },
     );
 
@@ -290,22 +314,136 @@ Please make sure you are running "flutterpatch init" from within your Flutter pr
       ).called(1);
     });
 
-    test('--force overwrites existing shorebird.yaml', () async {
-      when(() => shorebirdEnv.hasShorebirdYaml).thenReturn(true);
-      when(() => argResults['force']).thenReturn(true);
-      final exitCode = await runWithOverrides(command.run);
-      verifyNever(
-        () => logger.err(
-          'A "shorebird.yaml" file already exists and seems up-to-date.',
-        ),
-      );
-      expect(exitCode, ExitCode.success.code);
-      verify(
-        () => shorebirdYamlFile.writeAsStringSync(
-          any(that: contains('app_id: $appId')),
-        ),
-      ).called(1);
-    });
+    test(
+      '--force updates app id without dropping existing shorebird.yaml keys',
+      () async {
+        when(() => shorebirdEnv.hasShorebirdYaml).thenReturn(true);
+        when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(shorebirdYaml);
+        when(() => shorebirdYaml.appId).thenReturn('old-app-id');
+        when(() => shorebirdYaml.baseUrl).thenReturn('http://127.0.0.1:8080');
+        when(() => shorebirdYaml.flavors).thenReturn(null);
+        when(() => shorebirdYamlFile.readAsStringSync()).thenReturn('''
+app_id: old-app-id
+base_url: http://127.0.0.1:8080
+flutter: ../flutter_app
+upload_baselines: true
+''');
+        when(() => argResults['force']).thenReturn(true);
+        final exitCode = await runWithOverrides(command.run);
+        expect(exitCode, ExitCode.success.code);
+        verify(
+          () => shorebirdYamlFile.writeAsStringSync(
+            any(
+              that: allOf(
+                contains('app_id: $appId'),
+                contains('flutter: ../flutter_app'),
+                contains('upload_baselines: true'),
+                isNot(contains('old-app-id')),
+              ),
+            ),
+          ),
+        ).called(1);
+      },
+    );
+
+    test(
+      'does not rewrite shorebird.yaml when it already has app_id and base_url',
+      () async {
+        when(() => shorebirdEnv.hasShorebirdYaml).thenReturn(true);
+        when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(shorebirdYaml);
+        when(() => shorebirdYaml.appId).thenReturn(appId);
+        when(() => shorebirdYaml.baseUrl).thenReturn('http://127.0.0.1:8080');
+        when(() => shorebirdYaml.flavors).thenReturn(null);
+        when(() => shorebirdYamlFile.readAsStringSync()).thenReturn('''
+app_id: $appId
+base_url: http://127.0.0.1:8080
+flutter: ../flutter_app
+upload_baselines: true
+upload_patch_resources: true
+''');
+        final exitCode = await runWithOverrides(command.run);
+        expect(exitCode, ExitCode.success.code);
+        verifyNever(() => shorebirdYamlFile.writeAsStringSync(any()));
+        verifyNever(
+          () => codePushClientWrapper.createApp(
+            appName: any(named: 'appName'),
+            organizationId: any(named: 'organizationId'),
+          ),
+        );
+      },
+    );
+
+    test(
+      'patches only base_url when existing yaml is missing it',
+      () async {
+        when(() => shorebirdEnv.hasShorebirdYaml).thenReturn(true);
+        when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(shorebirdYaml);
+        when(() => shorebirdYaml.appId).thenReturn(appId);
+        when(() => shorebirdYaml.baseUrl).thenReturn(null);
+        when(() => shorebirdYaml.flavors).thenReturn(null);
+        when(() => shorebirdYamlFile.readAsStringSync()).thenReturn('''
+app_id: $appId
+flutter: ../flutter_app
+upload_baselines: true
+''');
+        when(() => argResults['base-url']).thenReturn('http://127.0.0.1:8080');
+        final exitCode = await runWithOverrides(command.run);
+        expect(exitCode, ExitCode.success.code);
+        verify(
+          () => shorebirdYamlFile.writeAsStringSync(
+            any(
+              that: allOf(
+                contains('base_url: http://127.0.0.1:8080'),
+                contains('flutter: ../flutter_app'),
+                contains('upload_baselines: true'),
+                contains('app_id: $appId'),
+              ),
+            ),
+          ),
+        ).called(1);
+        verifyNever(
+          () => codePushClientWrapper.createApp(
+            appName: any(named: 'appName'),
+            organizationId: any(named: 'organizationId'),
+          ),
+        );
+      },
+    );
+
+    test(
+      'continues app creation when existing yaml has pending app_id',
+      () async {
+        when(() => shorebirdEnv.hasShorebirdYaml).thenReturn(true);
+        when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(shorebirdYaml);
+        when(() => shorebirdYaml.appId).thenReturn('pending');
+        when(() => shorebirdYaml.baseUrl).thenReturn('http://127.0.0.1:8080');
+        when(() => shorebirdYaml.flavors).thenReturn(null);
+        when(() => shorebirdYamlFile.readAsStringSync()).thenReturn('''
+app_id: pending
+base_url: http://127.0.0.1:8080
+flutter: ../flutter_app
+''');
+        final exitCode = await runWithOverrides(command.run);
+        expect(exitCode, ExitCode.success.code);
+        verify(
+          () => codePushClientWrapper.createApp(
+            appName: appName,
+            organizationId: organizationId,
+          ),
+        ).called(1);
+        verify(
+          () => shorebirdYamlFile.writeAsStringSync(
+            any(
+              that: allOf(
+                contains('app_id: $appId'),
+                contains('flutter: ../flutter_app'),
+                isNot(contains('app_id: pending')),
+              ),
+            ),
+          ),
+        ).called(1);
+      },
+    );
 
     test('gracefully handles missing android project exceptions', () async {
       when(
@@ -755,11 +893,13 @@ Please make sure you are running "flutterpatch init" from within your Flutter pr
         verify(
           () => shorebirdYamlFile.writeAsStringSync(
             any(
-              that: contains('''
-app_id: ${appIds[0]}
+              that: allOf(
+                contains('app_id: ${appIds[0]}'),
+                contains('''
 flavors:
   internal: ${appIds[0]}
   stable: ${appIds[1]}'''),
+              ),
             ),
           ),
         ).called(1);
@@ -819,8 +959,9 @@ flavors:
         verify(
           () => shorebirdYamlFile.writeAsStringSync(
             any(
-              that: contains('''
-app_id: ${appIds[0]}
+              that: allOf(
+                contains('app_id: ${appIds[0]}'),
+                contains('''
 flavors:
   development: ${appIds[0]}
   developmentInternal: ${appIds[1]}
@@ -828,6 +969,7 @@ flavors:
   productionInternal: ${appIds[3]}
   staging: ${appIds[4]}
   stagingInternal: ${appIds[5]}'''),
+              ),
             ),
           ),
         );
@@ -893,8 +1035,9 @@ flavors:
         verify(
           () => shorebirdYamlFile.writeAsStringSync(
             any(
-              that: contains('''
-app_id: ${appIds[0]}
+              that: allOf(
+                contains('app_id: ${appIds[0]}'),
+                contains('''
 flavors:
   development: ${appIds[0]}
   developmentInternal: ${appIds[1]}
@@ -902,6 +1045,7 @@ flavors:
   productionInternal: ${appIds[3]}
   staging: ${appIds[4]}
   stagingInternal: ${appIds[5]}'''),
+              ),
             ),
           ),
         );
@@ -966,8 +1110,9 @@ flavors:
         verify(
           () => shorebirdYamlFile.writeAsStringSync(
             any(
-              that: contains('''
-app_id: ${appIds[0]}
+              that: allOf(
+                contains('app_id: ${appIds[0]}'),
+                contains('''
 flavors:
   development: ${appIds[1]}
   developmentInternal: ${appIds[2]}
@@ -975,6 +1120,7 @@ flavors:
   productionInternal: ${appIds[4]}
   staging: ${appIds[5]}
   stagingInternal: ${appIds[6]}'''),
+              ),
             ),
           ),
         );
@@ -1041,8 +1187,9 @@ flavors:
         verify(
           () => shorebirdYamlFile.writeAsStringSync(
             any(
-              that: contains('''
-app_id: ${appIds[0]}
+              that: allOf(
+                contains('app_id: ${appIds[0]}'),
+                contains('''
 flavors:
   development: ${appIds[1]}
   developmentInternal: ${appIds[2]}
@@ -1050,6 +1197,7 @@ flavors:
   productionInternal: ${appIds[4]}
   staging: ${appIds[5]}
   stagingInternal: ${appIds[6]}'''),
+              ),
             ),
           ),
         );
@@ -1118,8 +1266,9 @@ flavors:
         verify(
           () => shorebirdYamlFile.writeAsStringSync(
             any(
-              that: contains('''
-app_id: ${appIds[0]}
+              that: allOf(
+                contains('app_id: ${appIds[0]}'),
+                contains('''
 flavors:
   development: ${appIds[0]}
   developmentInternal: ${appIds[1]}
@@ -1127,6 +1276,7 @@ flavors:
   productionInternal: ${appIds[3]}
   staging: ${appIds[4]}
   stagingInternal: ${appIds[5]}'''),
+              ),
             ),
           ),
         );
@@ -1212,8 +1362,9 @@ flavors:
         verify(
           () => shorebirdYamlFile.writeAsStringSync(
             any(
-              that: contains('''
-app_id: test-appId-1
+              that: allOf(
+                contains('app_id: test-appId-1'),
+                contains('''
 flavors:
   dev: test-appId-1
   devInternal: test-appId-2
@@ -1224,6 +1375,7 @@ flavors:
   staging: test-appId-7
   stagingInternal: test-appId-8
   production-macos: test-appId-9'''),
+              ),
             ),
           ),
         );
@@ -1277,7 +1429,13 @@ flavors:
           when(() => shorebirdEnv.hasShorebirdYaml).thenReturn(true);
           when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(shorebirdYaml);
           when(() => shorebirdYaml.appId).thenReturn(appId);
+          when(() => shorebirdYaml.baseUrl).thenReturn('http://127.0.0.1:8080');
           when(() => shorebirdYaml.flavors).thenReturn(null);
+          when(() => shorebirdYamlFile.readAsStringSync()).thenReturn('''
+app_id: $appId
+base_url: http://127.0.0.1:8080
+flutter: ../flutter_app
+''');
         });
 
         test('creates flavor entries preserving existing app_id', () async {
@@ -1326,11 +1484,15 @@ flavors:
           verify(
             () => shorebirdYamlFile.writeAsStringSync(
               any(
-                that: contains('''
-app_id: test_app_id
+                that: allOf(
+                  contains('app_id: test_app_id'),
+                  contains('base_url: http://127.0.0.1:8080'),
+                  contains('flutter: ../flutter_app'),
+                  contains('''
 flavors:
   dev: test-appId-dev
   prod: test-appId-prod'''),
+                ),
               ),
             ),
           ).called(1);
@@ -1349,7 +1511,15 @@ flavors:
           when(() => shorebirdEnv.hasShorebirdYaml).thenReturn(true);
           when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(shorebirdYaml);
           when(() => shorebirdYaml.appId).thenReturn(appId);
+          when(() => shorebirdYaml.baseUrl).thenReturn('http://127.0.0.1:8080');
           when(() => shorebirdYaml.flavors).thenReturn(existingFlavors);
+          when(() => shorebirdYamlFile.readAsStringSync()).thenReturn('''
+app_id: $appId
+base_url: http://127.0.0.1:8080
+flavors:
+  a: test-appId-1
+  b: test-appId-2
+''');
         });
 
         test(
@@ -1418,13 +1588,15 @@ flavors:
           verify(
             () => shorebirdYamlFile.writeAsStringSync(
               any(
-                that: contains('''
-app_id: test_app_id
+                that: allOf(
+                  contains('app_id: test_app_id'),
+                  contains('''
 flavors:
   a: test-appId-1
   b: test-appId-2
   c: test-appId-3
   d: test-appId-4'''),
+                ),
               ),
             ),
           ).called(1);
@@ -1453,15 +1625,13 @@ flutter:
         () => logger.info(
           any(
             that: stringContainsInOrder([
-              lightGreen.wrap('🐦 Shorebird initialized successfully!')!,
-              '✅ A shorebird app has been created.',
-              '✅ A "shorebird.yaml" has been created.',
+              lightGreen.wrap('FlutterPatch initialized successfully!')!,
+              '✅ A FlutterPatch app has been created.',
+              '✅ A "shorebird.yaml" has been created',
+              '✅ A ".flutterpatch-supported-resources" whitelist has been created.',
               '''✅ The "pubspec.yaml" has been updated to include "shorebird.yaml" as an asset.''',
               '''📦 To create a new release use: "${lightCyan.wrap('flutterpatch release')}".''',
               '''🚀 To push an update use: "${lightCyan.wrap('flutterpatch patch')}".''',
-              '''👀 To preview a release use: "${lightCyan.wrap('flutterpatch preview')}".''',
-              '''For more information about Shorebird, visit ${link(uri: Uri.parse('https://shorebird.dev'))}''',
-              '',
             ]),
           ),
         ),
@@ -1480,7 +1650,7 @@ flutter:
         () => logger.info(
           any(
             that: contains(
-              lightGreen.wrap('🐦 Shorebird initialized successfully!'),
+              lightGreen.wrap('FlutterPatch initialized successfully!'),
             ),
           ),
         ),

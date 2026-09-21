@@ -187,11 +187,13 @@ More info: ${troubleshootingUrl.toLink()}.
       final baseline = loadScannedAssetsFromFile(baselinePath);
       final flutterDir = _flutterProjectDir;
       final ignore = FlutterPatchIgnore.load(flutterDir);
+      final supported = SupportedResourceExtensions.load(flutterDir);
       final unsupported = FlutterPatchIgnore.loadUnsupported(flutterDir);
       final classified = diffAndClassifyScannedAssets(
         baseline: baseline,
         next: next,
         ignore: ignore,
+        supported: supported,
         unsupported: unsupported,
       );
       _assertNoUnsupportedResourceChanges(classified);
@@ -519,16 +521,19 @@ More info: ${troubleshootingUrl.toLink()}.
 
       final flutterDir = _flutterProjectDir;
       final ignore = FlutterPatchIgnore.load(flutterDir);
+      final supported = SupportedResourceExtensions.load(flutterDir);
       final unsupported = FlutterPatchIgnore.loadUnsupported(flutterDir);
       final scanned = await scanFlutterAssets(
         appDir: flutterDir,
         releaseVersion: releaseVersion,
         ignore: ignore,
+        supported: supported,
       );
       final classified = diffAndClassifyScannedAssets(
         baseline: baseline.resourceAssets,
         next: scanned.resources,
         ignore: ignore,
+        supported: supported,
         unsupported: unsupported,
       );
       if (classified.hasUnsupported) {

@@ -16,7 +16,10 @@ void main() {
         ),
         isTrue,
       );
-      expect(ignore.isIgnoredSnapshotPath('package:dep_pkg/lib/x.dart'), isFalse);
+      expect(
+        ignore.isIgnoredSnapshotPath('package:dep_pkg/lib/x.dart'),
+        isFalse,
+      );
     });
 
     test('parses comments and blank lines', () {
@@ -114,8 +117,9 @@ frameworks
       addTearDown(() => root.deleteSync(recursive: true));
       final flutter = Directory(p.join(root.path, 'metaapp_flutter'))
         ..createSync();
-      File(p.join(root.path, '.flutterpatchignore'))
-          .writeAsStringSync('unityLibrary\n');
+      File(
+        p.join(root.path, '.flutterpatchignore'),
+      ).writeAsStringSync('unityLibrary\n');
 
       final ignore = FlutterPatchIgnore.load(flutter.path);
       expect(ignore.filePath, isNotNull);
@@ -133,13 +137,18 @@ frameworks
     test('loadUnsupported reads .flutterpatch-unsupported-resources', () {
       final dir = Directory.systemTemp.createTempSync('flutterpatch_unsup_');
       addTearDown(() => dir.deleteSync(recursive: true));
-      File(p.join(dir.path, '.flutterpatch-unsupported-resources'))
-          .writeAsStringSync('assets/fonts/**\n');
-      File(p.join(dir.path, '.flutterpatchignore'))
-          .writeAsStringSync('assets/tmp/**\n');
+      File(
+        p.join(dir.path, '.flutterpatch-unsupported-resources'),
+      ).writeAsStringSync('assets/fonts/**\n');
+      File(
+        p.join(dir.path, '.flutterpatchignore'),
+      ).writeAsStringSync('assets/tmp/**\n');
 
       final unsupported = FlutterPatchIgnore.loadUnsupported(dir.path);
-      expect(unsupported.filePath, endsWith('.flutterpatch-unsupported-resources'));
+      expect(
+        unsupported.filePath,
+        endsWith('.flutterpatch-unsupported-resources'),
+      );
       expect(unsupported.isIgnored('assets/fonts/a.ttf'), isTrue);
       expect(unsupported.isIgnored('assets/tmp/x.png'), isFalse);
 
@@ -166,8 +175,8 @@ frameworks
 name: demo
 flutter:
   assets:
-    - assets/a.txt
-    - assets/skip.txt
+    - assets/a.png
+    - assets/skip.png
 ''');
       File(p.join(flutter.path, 'lib', 'main.dart'))
         ..createSync(recursive: true)
@@ -175,16 +184,17 @@ flutter:
       File(p.join(flutter.path, 'lib', 'generated', 'x.dart'))
         ..createSync(recursive: true)
         ..writeAsStringSync('class X {}');
-      File(p.join(flutter.path, 'assets', 'a.txt'))
+      File(p.join(flutter.path, 'assets', 'a.png'))
         ..createSync(recursive: true)
         ..writeAsStringSync('a');
-      File(p.join(flutter.path, 'assets', 'skip.txt'))
+      File(p.join(flutter.path, 'assets', 'skip.png'))
         ..createSync(recursive: true)
         ..writeAsStringSync('skip');
 
       Directory(p.join(flutter.path, '.dart_tool')).createSync();
-      File(p.join(flutter.path, '.dart_tool', 'package_config.json'))
-          .writeAsStringSync(jsonPackageConfig(flutter.path));
+      File(
+        p.join(flutter.path, '.dart_tool', 'package_config.json'),
+      ).writeAsStringSync(jsonPackageConfig(flutter.path));
       File(p.join(flutter.path, 'pubspec.lock')).writeAsStringSync('''
 packages:
   demo:
@@ -201,7 +211,16 @@ packages:
     test('compare skips paths ignored locally even if in baseline', () async {
       final flutter = await makeApp();
       final android = Directory(p.join(tmp.path, 'android'))..createSync();
-      File(p.join(android.path, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'))
+      File(
+          p.join(
+            android.path,
+            'app',
+            'src',
+            'main',
+            'kotlin',
+            'MainActivity.kt',
+          ),
+        )
         ..createSync(recursive: true)
         ..writeAsStringSync('class MainActivity');
       File(p.join(android.path, 'unityLibrary', 'src', 'Foo.java'))
@@ -216,10 +235,12 @@ packages:
       );
 
       // After baseline includes unityLibrary, ignore it locally.
-      File(p.join(flutter.path, '.flutterpatchignore'))
-          .writeAsStringSync('unityLibrary\n');
-      File(p.join(android.path, 'unityLibrary', 'src', 'Foo.java'))
-          .writeAsStringSync('class Foo { void changed() {} }');
+      File(
+        p.join(flutter.path, '.flutterpatchignore'),
+      ).writeAsStringSync('unityLibrary\n');
+      File(
+        p.join(android.path, 'unityLibrary', 'src', 'Foo.java'),
+      ).writeAsStringSync('class Foo { void changed() {} }');
 
       final result = await checkOta(
         flutterDir: flutter.path,
@@ -242,7 +263,7 @@ packages:
       final flutter = await makeApp();
       File(p.join(flutter.path, '.flutterpatchignore')).writeAsStringSync('''
 lib/generated/**
-assets/skip.txt
+assets/skip.png
 ''');
 
       final result = await checkOta(
@@ -252,9 +273,9 @@ assets/skip.txt
       );
       final paths = result.snapshot.files.map((f) => f.path).toSet();
       expect(paths, contains('lib/main.dart'));
-      expect(paths, contains('assets/a.txt'));
+      expect(paths, contains('assets/a.png'));
       expect(paths, isNot(contains('lib/generated/x.dart')));
-      expect(paths, isNot(contains('assets/skip.txt')));
+      expect(paths, isNot(contains('assets/skip.png')));
     });
 
     test('compare skips paths ignored by current rules', () {
@@ -315,8 +336,7 @@ assets/skip.txt
       );
       expect(
         changes.any(
-          (c) =>
-              c.path == 'lib/main.dart' && c.kind == FileChangeKind.modified,
+          (c) => c.path == 'lib/main.dart' && c.kind == FileChangeKind.modified,
         ),
         isTrue,
       );
@@ -325,7 +345,7 @@ assets/skip.txt
     test('scanFlutterAssets skips ignored assets', () async {
       final flutter = await makeApp();
       File(p.join(flutter.path, '.flutterpatchignore')).writeAsStringSync('''
-assets/skip.txt
+assets/skip.png
 ''');
 
       final result = await scanFlutterAssets(
@@ -333,15 +353,16 @@ assets/skip.txt
         writeConfig: false,
       );
       final paths = result.resources.map((r) => r.path).toSet();
-      expect(paths, contains('assets/a.txt'));
-      expect(paths, isNot(contains('assets/skip.txt')));
+      expect(paths, contains('assets/a.png'));
+      expect(paths, isNot(contains('assets/skip.png')));
     });
 
     test('scanFlutterAssets keeps unsupported-listed assets', () async {
       final flutter = await makeApp();
-      File(p.join(flutter.path, '.flutterpatch-unsupported-resources'))
-          .writeAsStringSync('''
-assets/skip.txt
+      File(
+        p.join(flutter.path, '.flutterpatch-unsupported-resources'),
+      ).writeAsStringSync('''
+assets/skip.png
 ''');
 
       final result = await scanFlutterAssets(
@@ -349,8 +370,62 @@ assets/skip.txt
         writeConfig: false,
       );
       final paths = result.resources.map((r) => r.path).toSet();
-      expect(paths, contains('assets/a.txt'));
-      expect(paths, contains('assets/skip.txt'));
+      expect(paths, contains('assets/a.png'));
+      expect(paths, contains('assets/skip.png'));
+    });
+  });
+
+  group('SupportedResourceExtensions', () {
+    test('parse accepts dotted and bare extensions', () {
+      final supported = SupportedResourceExtensions.parse('''
+# comment
+
+.png
+JPG
+*.webp
+''');
+      expect(supported.isSupportedPath('a.PNG'), isTrue);
+      expect(supported.isSupportedPath('dir/a.jpg'), isTrue);
+      expect(supported.isSupportedPath('a.webp'), isTrue);
+      expect(supported.isSupportedPath('a.txt'), isFalse);
+      expect(supported.isSupportedPath('README'), isFalse);
+    });
+
+    test('empty file falls back to image video and audio defaults', () {
+      final supported = SupportedResourceExtensions.parse('# only comments\n');
+      expect(supported.isSupportedPath('a.png'), isTrue);
+      expect(supported.isSupportedPath('clip.mp4'), isTrue);
+      expect(supported.isSupportedPath('a.mp3'), isTrue);
+      expect(supported.isSupportedPath('fonts/a.ttf'), isFalse);
+      expect(supported.isSupportedPath('a.txt'), isFalse);
+    });
+
+    test('load reads a project file and ensureFile writes defaults', () {
+      final dir = Directory.systemTemp.createTempSync('supported_ext_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      File(
+        p.join(dir.path, flutterPatchSupportedResourcesFileName),
+      ).writeAsStringSync('.svg\n');
+
+      final loaded = SupportedResourceExtensions.load(dir.path);
+      expect(loaded.filePath, endsWith(flutterPatchSupportedResourcesFileName));
+      expect(loaded.isSupportedPath('icon.svg'), isTrue);
+      expect(loaded.isSupportedPath('icon.png'), isFalse);
+
+      final other = Directory.systemTemp.createTempSync('supported_ext_new_');
+      addTearDown(() => other.deleteSync(recursive: true));
+      final created = SupportedResourceExtensions.load(
+        other.path,
+        ensureFile: true,
+      );
+      expect(
+        File(
+          p.join(other.path, flutterPatchSupportedResourcesFileName),
+        ).existsSync(),
+        isTrue,
+      );
+      expect(created.isSupportedPath('a.png'), isTrue);
+      expect(created.extensionCount, defaultSupportedResourceExtensions.length);
     });
   });
 }

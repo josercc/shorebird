@@ -11,12 +11,91 @@ const String flutterPatchIgnoreFileName = '.flutterpatchignore';
 /// Legacy meta_ota ignore file (still loaded for compatibility).
 const String metaOtaIgnoreFileName = '.meta_otaignore';
 
-/// Paths that **cannot be hot-updated** if they change (e.g. fonts).
+/// Paths that **cannot be hot-updated** if they change (e.g. a specific asset).
 ///
 /// Same gitignore syntax as [flutterPatchIgnoreFileName], but opposite
 /// resource semantics: still inventoried and compared; a change aborts patch
 /// and requires a full release. Not packaged into the app.
-const String flutterPatchUnsupportedResourcesFileName = '.flutterpatch-unsupported-resources';
+///
+/// Prefer [flutterPatchSupportedResourcesFileName] for extension-level policy:
+/// unsupported suffixes are auto-ignored instead of listed here one-by-one.
+const String flutterPatchUnsupportedResourcesFileName =
+    '.flutterpatch-unsupported-resources';
+
+/// Whitelist of resource extensions that may be hot-updated (images / video /
+/// audio by default).
+///
+/// One extension per line (`png` or `.png`). Assets whose extension is not
+/// listed are **auto-ignored** during scan and diff (not compared, not
+/// uploaded).
+const String flutterPatchSupportedResourcesFileName =
+    '.flutterpatch-supported-resources';
+
+/// Built-in hot-updatable extensions when no supported-resources file exists.
+const Set<String> defaultSupportedResourceExtensions = {
+  // Images
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'bmp',
+  'svg',
+  'ico',
+  'heic',
+  'heif',
+  // Video
+  'mp4',
+  'mov',
+  'webm',
+  'avi',
+  'mkv',
+  'm4v',
+  // Audio
+  'mp3',
+  'wav',
+  'aac',
+  'm4a',
+  'ogg',
+  'flac',
+  'opus',
+};
+
+/// Default contents written for [flutterPatchSupportedResourcesFileName].
+const String defaultSupportedResourcesFileContents = '''
+# Extensions that can be hot-updated as Flutter assets (one per line).
+# `.png` and `png` are equivalent. Blank lines and # comments are ignored.
+# Assets whose extension is not listed are auto-ignored during scan/diff.
+
+# Images
+png
+jpg
+jpeg
+gif
+webp
+bmp
+svg
+ico
+heic
+heif
+
+# Video
+mp4
+mov
+webm
+avi
+mkv
+m4v
+
+# Audio
+mp3
+wav
+aac
+m4a
+ogg
+flac
+opus
+''';
 
 /// Supported platform section headers in ignore files: `[android]` / `[ios]`.
 const Set<String> ignorePlatformSections = {'android', 'ios'};
@@ -178,13 +257,12 @@ class FlutterPatchIgnore {
   factory FlutterPatchIgnore.empty({
     String projectDir = '',
     String? platform,
-  }) =>
-      FlutterPatchIgnore._(
-        projectDir: projectDir,
-        filePath: null,
-        platform: _normalizePlatform(platform),
-        rules: const [],
-      );
+  }) => FlutterPatchIgnore._(
+    projectDir: projectDir,
+    filePath: null,
+    platform: _normalizePlatform(platform),
+    rules: const [],
+  );
 
   static String? _normalizePlatform(String? platform) {
     if (platform == null || platform.isEmpty) return null;
@@ -247,6 +325,145 @@ class FlutterPatchIgnore {
     }
     return false;
   }
+}
+
+/// Whitelist of file extensions allowed in Flutter asset hot-update flows.
+///
+/// Load with [SupportedResourceExtensions.load] (file or built-in defaults).
+/// Assets whose extension is not listed are treated as ignored.
+class SupportedResourceExtensions {
+  SupportedResourceExtensions._({
+    required this.projectDir,
+    required this.filePath,
+    required Set<String> extensions,
+  }) : _extensions = extensions;
+
+  /// Directory used as the search start (usually Flutter app dir).
+  final String projectDir;
+
+  /// Absolute path of the loaded file, or null when using built-in defaults.
+  final String? filePath;
+
+  final Set<String> _extensions;
+
+  /// Normalized extensions without a leading `.` (lowercase).
+  Set<String> get extensions => Set.unmodifiable(_extensions);
+
+  /// Whether the whitelist contains no extensions.
+  bool get isEmpty => _extensions.isEmpty;
+
+  /// Number of whitelisted extensions.
+  int get extensionCount => _extensions.length;
+
+  /// Built-in image / video / audio extensions.
+  factory SupportedResourceExtensions.defaults({String projectDir = ''}) =>
+      SupportedResourceExtensions._(
+        projectDir: projectDir,
+        filePath: null,
+        extensions: Set<String>.from(defaultSupportedResourceExtensions),
+      );
+
+  /// Load `.flutterpatch-supported-resources`, walking up parents.
+  ///
+  /// When no file exists, returns [SupportedResourceExtensions.defaults].
+  /// When [ensureFile] is true and no file is found, writes the default
+  /// template at [projectDir] and loads it.
+  factory SupportedResourceExtensions.load(
+    String projectDir, {
+    bool ensureFile = false,
+  }) {
+    final start = p.normalize(p.absolute(projectDir));
+    final found = FlutterPatchIgnore._findNamedFile(start, const [
+      flutterPatchSupportedResourcesFileName,
+    ]);
+    if (found != null) {
+      return SupportedResourceExtensions.parse(
+        File(found).readAsStringSync(),
+        projectDir: start,
+        filePath: found,
+      );
+    }
+    if (ensureFile) {
+      final created = ensureSupportedResourcesFile(start);
+      return SupportedResourceExtensions.parse(
+        File(created).readAsStringSync(),
+        projectDir: start,
+        filePath: created,
+      );
+    }
+    return SupportedResourceExtensions.defaults(projectDir: start);
+  }
+
+  /// Parse supported-resources file contents.
+  ///
+  /// Empty or comment-only files fall back to
+  /// [defaultSupportedResourceExtensions].
+  factory SupportedResourceExtensions.parse(
+    String contents, {
+    String projectDir = '',
+    String? filePath,
+  }) {
+    final extensions = <String>{};
+    for (final rawLine in contents.split(RegExp(r'\r?\n'))) {
+      final line = rawLine.trim();
+      if (line.isEmpty) continue;
+      if (line.startsWith('#')) continue;
+      final normalized = _normalizeExtension(line);
+      if (normalized != null) extensions.add(normalized);
+    }
+    if (extensions.isEmpty) {
+      extensions.addAll(defaultSupportedResourceExtensions);
+    }
+    return SupportedResourceExtensions._(
+      projectDir: projectDir,
+      filePath: filePath,
+      extensions: extensions,
+    );
+  }
+
+  /// Whether [path] has an extension on the whitelist.
+  bool isSupportedPath(String path) {
+    final ext = extensionOfPath(path);
+    if (ext == null) return false;
+    return _extensions.contains(ext);
+  }
+
+  /// File extension without `.`, lowercase; null if [path] has none.
+  static String? extensionOfPath(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    final base = normalized.contains('/')
+        ? normalized.substring(normalized.lastIndexOf('/') + 1)
+        : normalized;
+    final dot = base.lastIndexOf('.');
+    if (dot <= 0 || dot == base.length - 1) return null;
+    return base.substring(dot + 1).toLowerCase();
+  }
+
+  static String? _normalizeExtension(String raw) {
+    var value = raw.trim().toLowerCase();
+    if (value.isEmpty) return null;
+    if (value.startsWith('*.')) value = value.substring(2);
+    if (value.startsWith('.')) value = value.substring(1);
+    if (value.isEmpty || value.contains('/') || value.contains('*')) {
+      return null;
+    }
+    return value;
+  }
+}
+
+/// Write [defaultSupportedResourcesFileContents] under [projectDir] if missing.
+///
+/// Returns the absolute path of the file (existing or newly created).
+String ensureSupportedResourcesFile(String projectDir) {
+  final path = p.join(
+    p.normalize(p.absolute(projectDir)),
+    flutterPatchSupportedResourcesFileName,
+  );
+  final file = File(path);
+  if (!file.existsSync()) {
+    file.writeAsStringSync(defaultSupportedResourcesFileContents);
+  }
+  return path;
 }
 
 class _IgnoreRule {

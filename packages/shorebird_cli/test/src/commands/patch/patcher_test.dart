@@ -231,7 +231,7 @@ void main() {
             patchArtifactBundles: any(named: 'patchArtifactBundles'),
             force: any(named: 'force'),
           ),
-        ).thenAnswer((_) async {});
+        ).thenAnswer((_) async => 1);
         await runScoped(
           () async {
             await patcher.uploadPatchArtifacts(
@@ -316,8 +316,9 @@ void main() {
         when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(
           const ShorebirdYaml(appId: 'test_app_id'),
         );
-        when(() => codePushClientWrapper.codePushClient)
-            .thenReturn(codePushClient);
+        when(
+          () => codePushClientWrapper.codePushClient,
+        ).thenReturn(codePushClient);
         when(
           () => codePushClient.comparePatchResources(
             appId: any(named: 'appId'),
@@ -436,8 +437,9 @@ void main() {
         when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(
           const ShorebirdYaml(appId: 'test_app_id'),
         );
-        when(() => codePushClientWrapper.codePushClient)
-            .thenReturn(codePushClient);
+        when(
+          () => codePushClientWrapper.codePushClient,
+        ).thenReturn(codePushClient);
         when(
           () => codePushClientWrapper.publishPatch(
             appId: any(named: 'appId'),
@@ -449,7 +451,7 @@ void main() {
             changedResources: any(named: 'changedResources'),
             force: any(named: 'force'),
           ),
-        ).thenAnswer((_) async {});
+        ).thenAnswer((_) async => 1);
 
         await runScoped(
           () async {
@@ -501,7 +503,9 @@ void main() {
       test('exits when ignore-listed resources changed', () async {
         final temp = Directory.systemTemp.createTempSync('patch_unsupported_');
         addTearDown(() => temp.deleteSync(recursive: true));
-        File(p.join(temp.path, '.flutterpatch-unsupported-resources')).writeAsStringSync(
+        File(
+          p.join(temp.path, '.flutterpatch-unsupported-resources'),
+        ).writeAsStringSync(
           'assets/fonts/**\n',
         );
         final baseline = File(p.join(temp.path, 'baseline.json'))
@@ -511,7 +515,7 @@ void main() {
   "release_version": "1.0.0+1",
   "count": 1,
   "resources": [
-    {"package": "app", "path": "assets/fonts/Roboto.ttf", "hash": "old", "size": 1}
+    {"package": "app", "path": "assets/fonts/Roboto.png", "hash": "old", "size": 1}
   ]
 }
 ''',
@@ -523,7 +527,7 @@ void main() {
   "release_version": "1.0.0+1",
   "count": 1,
   "resources": [
-    {"package": "app", "path": "assets/fonts/Roboto.ttf", "hash": "new", "size": 2}
+    {"package": "app", "path": "assets/fonts/Roboto.png", "hash": "new", "size": 2}
   ]
 }
 ''',
@@ -577,7 +581,9 @@ void main() {
               );
             },
             values: {
-              codePushClientWrapperRef.overrideWith(() => codePushClientWrapper),
+              codePushClientWrapperRef.overrideWith(
+                () => codePushClientWrapper,
+              ),
               loggerRef.overrideWith(() => logger),
               shorebirdEnvRef.overrideWith(() => shorebirdEnv),
             },

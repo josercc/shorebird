@@ -34,12 +34,12 @@ class ScannedAsset {
   final String hash;
 
   Map<String, dynamic> toJson() => {
-        'package': package,
-        'package_hash': packageHash,
-        'path': path,
-        'size': size,
-        'hash': hash,
-      };
+    'package': package,
+    'package_hash': packageHash,
+    'path': path,
+    'size': size,
+    'hash': hash,
+  };
 }
 
 class ScanAssetsResult {
@@ -56,16 +56,21 @@ class ScanAssetsResult {
   final String? releaseVersion;
 
   Map<String, dynamic> toJson() => {
-        'app_dir': appDir,
-        if (releaseVersion != null && releaseVersion!.isNotEmpty)
-          'release_version': releaseVersion,
-        'generated_at': DateTime.now().toUtc().toIso8601String(),
-        'count': resources.length,
-        'resources': resources.map((r) => r.toJson()).toList(),
-      };
+    'app_dir': appDir,
+    if (releaseVersion != null && releaseVersion!.isNotEmpty)
+      'release_version': releaseVersion,
+    'generated_at': DateTime.now().toUtc().toIso8601String(),
+    'count': resources.length,
+    'resources': resources.map((r) => r.toJson()).toList(),
+  };
 }
 
 /// Scan [appDir] Flutter assets (app + dependency packages) and write JSON.
+///
+/// Only extensions listed in `.flutterpatch-supported-resources` (or the
+/// built-in image/video/audio defaults) are inventoried. Other suffixes are
+/// auto-ignored. Pass [supported] to override; when null, the project file is
+/// loaded (and created with defaults when [writeConfig] is true).
 Future<ScanAssetsResult> scanFlutterAssets({
   required String appDir,
   String? outPath,
@@ -73,6 +78,7 @@ Future<ScanAssetsResult> scanFlutterAssets({
   String? releaseVersion,
   bool writeConfig = true,
   FlutterPatchIgnore? ignore,
+  SupportedResourceExtensions? supported,
 }) async {
   final root = p.normalize(p.absolute(appDir));
   final pubspecFile = File(p.join(root, 'pubspec.yaml'));
@@ -90,9 +96,14 @@ Future<ScanAssetsResult> scanFlutterAssets({
   }
 
   // `.flutterpatchignore` excludes paths from inventory (do not compare).
-  // Unsupported-for-hot-update paths live in `.flutterpatch-unsupported-resources` and
-  // remain in the inventory so patch can detect changes.
+  // `.flutterpatch-supported-resources` whitelists hot-updatable extensions;
+  // other suffixes are auto-ignored. Path-level
+  // `.flutterpatch-unsupported-resources` still stay in inventory so patch can
+  // abort when those change.
   final ignoreRules = ignore ?? FlutterPatchIgnore.load(root);
+  final supportedExts =
+      supported ??
+      SupportedResourceExtensions.load(root, ensureFile: writeConfig);
   final lockHashes = _loadPackageHashes(File(p.join(root, 'pubspec.lock')));
   final lockKinds = _loadPackageDependencyKinds(
     File(p.join(root, 'pubspec.lock')),
@@ -112,6 +123,7 @@ Future<ScanAssetsResult> scanFlutterAssets({
 
   final seen = <String>{};
   final resources = <ScannedAsset>[];
+  final skippedByExtension = <String>{};
 
   for (final pkg in packages.values) {
     if (!_shouldIncludePackage(
@@ -135,9 +147,14 @@ Future<ScanAssetsResult> scanFlutterAssets({
       for (final fileRel in expandAssetEntry(pkg.rootUri, relative)) {
         final abs = p.normalize(p.join(pkg.rootUri, fileRel));
         final posixRel = fileRel.replaceAll('\\', '/');
-        final snapPath =
-            isRoot ? posixRel : 'package:${pkg.name}/$posixRel';
+        final snapPath = isRoot ? posixRel : 'package:${pkg.name}/$posixRel';
         if (ignoreRules.isIgnoredSnapshotPath(snapPath)) {
+          continue;
+        }
+        if (!supportedExts.isSupportedPath(posixRel)) {
+          final ext =
+              SupportedResourceExtensions.extensionOfPath(posixRel) ?? '(none)';
+          skippedByExtension.add(ext);
           continue;
         }
 
@@ -159,6 +176,17 @@ Future<ScanAssetsResult> scanFlutterAssets({
         );
       }
     }
+  }
+
+  if (skippedByExtension.isNotEmpty) {
+    final sorted = skippedByExtension.toList()..sort();
+    final whitelist =
+        supportedExts.filePath ?? flutterPatchSupportedResourcesFileName;
+    stderr.writeln(
+      '==> Auto-ignored unsupported resource extensions: '
+      '${sorted.join(', ')} '
+      '(whitelist: $whitelist)',
+    );
   }
 
   resources.sort((a, b) {
@@ -197,7 +225,8 @@ class _PackageRef {
 }
 
 Map<String, _PackageRef> _loadPackages(File packageConfigFile) {
-  final raw = jsonDecode(packageConfigFile.readAsStringSync()) as Map<String, dynamic>;
+  final raw =
+      jsonDecode(packageConfigFile.readAsStringSync()) as Map<String, dynamic>;
   final list = raw['packages'] as List<dynamic>? ?? const [];
   final out = <String, _PackageRef>{};
 
@@ -245,7 +274,9 @@ List<ScannablePackage> listScannablePackages({
   bool includeDev = false,
 }) {
   final root = p.normalize(p.absolute(appDir));
-  final packageConfigFile = File(p.join(root, '.dart_tool', 'package_config.json'));
+  final packageConfigFile = File(
+    p.join(root, '.dart_tool', 'package_config.json'),
+  );
   if (!packageConfigFile.existsSync()) {
     throw StateError(
       '缺少 .dart_tool/package_config.json，请先在工程目录执行: flutter pub get',
@@ -517,16 +548,25 @@ class ResourceDiffResult {
 /// `change` is `add` | `update` | `remove`.
 ///
 /// When [ignore] is set (`.flutterpatchignore`), matching assets are excluded
-/// from both sides before diffing. Pass [unsupported] via
-/// [diffAndClassifyScannedAssets] to detect non-hot-updatable changes.
+/// from both sides before diffing. When [supported] is set, assets whose
+/// extension is not whitelisted are also excluded. Pass [unsupported] via
+/// [diffAndClassifyScannedAssets] to detect non-hot-updatable path changes.
 List<Map<String, Object?>> diffScannedAssets({
   required List<ScannedAsset> baseline,
   required List<ScannedAsset> next,
   FlutterPatchIgnore? ignore,
+  SupportedResourceExtensions? supported,
 }) {
-  bool skipped(ScannedAsset a) =>
-      ignore != null &&
-      ignore.isIgnoredAsset(package: a.package, path: a.path);
+  bool skipped(ScannedAsset a) {
+    if (ignore != null &&
+        ignore.isIgnoredAsset(package: a.package, path: a.path)) {
+      return true;
+    }
+    if (supported != null && !supported.isSupportedPath(a.path)) {
+      return true;
+    }
+    return false;
+  }
 
   String key(ScannedAsset a) => '${a.package}|${a.path}';
   final baseMap = {
@@ -615,11 +655,12 @@ ResourceDiffResult classifyResourceChanges({
   );
 }
 
-/// Diff (honoring [ignore]), then classify by [unsupported].
+/// Diff (honoring [ignore] + [supported]), then classify by [unsupported].
 ResourceDiffResult diffAndClassifyScannedAssets({
   required List<ScannedAsset> baseline,
   required List<ScannedAsset> next,
   FlutterPatchIgnore? ignore,
+  SupportedResourceExtensions? supported,
   FlutterPatchIgnore? unsupported,
 }) {
   return classifyResourceChanges(
@@ -627,6 +668,7 @@ ResourceDiffResult diffAndClassifyScannedAssets({
       baseline: baseline,
       next: next,
       ignore: ignore,
+      supported: supported,
     ),
     unsupported: unsupported,
   );

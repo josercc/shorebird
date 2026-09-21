@@ -54,7 +54,7 @@ flutter:
     File(p.join(app.path, 'assets', 'logo.png'))
       ..createSync(recursive: true)
       ..writeAsBytesSync(logoBytes);
-    File(p.join(app.path, 'assets', 'extra', 'a.txt'))
+    File(p.join(app.path, 'assets', 'extra', 'a.jpg'))
       ..createSync(recursive: true)
       ..writeAsBytesSync(extraBytes);
     // Nested file under directory entry should NOT be included (Flutter one-level).
@@ -89,7 +89,9 @@ packages:
 ''');
 
     Directory(p.join(app.path, '.dart_tool')).createSync();
-    File(p.join(app.path, '.dart_tool', 'package_config.json')).writeAsStringSync(
+    File(
+      p.join(app.path, '.dart_tool', 'package_config.json'),
+    ).writeAsStringSync(
       jsonEncode({
         'configVersion': 2,
         'packages': [
@@ -115,7 +117,7 @@ packages:
     final out = p.join(tmp.path, 'out.json');
     final result = await scanFlutterAssets(appDir: app.path, outPath: out);
 
-    expect(result.resources.length, 4);
+    expect(result.resources.length, 3);
     expect(File(out).existsSync(), isTrue);
 
     final byKey = {
@@ -127,15 +129,17 @@ packages:
       byKey['my_app:assets/logo.png']!.hash,
       sha256.convert(logoBytes).toString(),
     );
-    expect(byKey['my_app:assets/extra/a.txt']!.size, extraBytes.length);
+    expect(byKey['my_app:assets/extra/a.jpg']!.size, extraBytes.length);
     expect(byKey.containsKey('my_app:assets/extra/nested/skip.bin'), isFalse);
+    // Fonts are not in the default supported-extension whitelist.
+    expect(byKey.containsKey('dep_pkg:fonts/DepFont.ttf'), isFalse);
 
     expect(byKey['dep_pkg:assets/icon.png']!.size, iconBytes.length);
-    expect(byKey['dep_pkg:fonts/DepFont.ttf']!.size, fontBytes.length);
     expect(byKey['dep_pkg:assets/icon.png']!.packageHash, isNull);
 
-    final json = jsonDecode(File(out).readAsStringSync()) as Map<String, dynamic>;
-    expect(json['count'], 4);
+    final json =
+        jsonDecode(File(out).readAsStringSync()) as Map<String, dynamic>;
+    expect(json['count'], 3);
     expect(json['resources'], isA<List>());
   });
 
@@ -147,17 +151,17 @@ packages:
 name: app2
 flutter:
   assets:
-    - a.txt
+    - a.png
 ''');
-    File(p.join(app.path, 'a.txt')).writeAsStringSync('app');
+    File(p.join(app.path, 'a.png')).writeAsStringSync('app');
 
     File(p.join(dev.path, 'pubspec.yaml')).writeAsStringSync('''
 name: dev_pkg
 flutter:
   assets:
-    - d.txt
+    - d.png
 ''');
-    File(p.join(dev.path, 'd.txt')).writeAsStringSync('dev');
+    File(p.join(dev.path, 'd.png')).writeAsStringSync('dev');
 
     File(p.join(app.path, 'pubspec.lock')).writeAsStringSync('''
 packages:
@@ -171,7 +175,9 @@ packages:
 ''');
 
     Directory(p.join(app.path, '.dart_tool')).createSync();
-    File(p.join(app.path, '.dart_tool', 'package_config.json')).writeAsStringSync(
+    File(
+      p.join(app.path, '.dart_tool', 'package_config.json'),
+    ).writeAsStringSync(
       jsonEncode({
         'configVersion': 2,
         'packages': [
@@ -196,7 +202,10 @@ packages:
       outPath: p.join(tmp.path, 'with_dev.json'),
       includeDev: true,
     );
-    expect(withDev.resources.map((r) => r.package).toSet(), {'app2', 'dev_pkg'});
+    expect(withDev.resources.map((r) => r.package).toSet(), {
+      'app2',
+      'dev_pkg',
+    });
   });
 
   test('uses hosted package_hash from pubspec.lock', () async {
@@ -215,9 +224,9 @@ flutter:
 name: hosted_pkg
 flutter:
   assets:
-    - x.bin
+    - x.png
 ''');
-    File(p.join(hosted.path, 'x.bin')).writeAsBytesSync([7, 7, 7]);
+    File(p.join(hosted.path, 'x.png')).writeAsBytesSync([7, 7, 7]);
 
     File(p.join(app.path, 'pubspec.lock')).writeAsStringSync('''
 packages:
@@ -232,7 +241,9 @@ packages:
 ''');
 
     Directory(p.join(app.path, '.dart_tool')).createSync();
-    File(p.join(app.path, '.dart_tool', 'package_config.json')).writeAsStringSync(
+    File(
+      p.join(app.path, '.dart_tool', 'package_config.json'),
+    ).writeAsStringSync(
       jsonEncode({
         'configVersion': 2,
         'packages': [
@@ -253,7 +264,7 @@ packages:
     expect(result.resources, hasLength(1));
     expect(result.resources.single.package, 'hosted_pkg');
     expect(result.resources.single.packageHash, pkgHash);
-    expect(result.resources.single.path, 'x.bin');
+    expect(result.resources.single.path, 'x.png');
     expect(result.resources.single.size, 3);
   });
 
@@ -291,10 +302,17 @@ packages:
       ),
     ];
     final changes = diffScannedAssets(baseline: baseline, next: next);
-    expect(changes.map((c) => c['change']).toList(), ['update', 'add', 'remove']);
+    expect(changes.map((c) => c['change']).toList(), [
+      'update',
+      'add',
+      'remove',
+    ]);
     expect(changes.firstWhere((c) => c['change'] == 'update')['path'], 'a.png');
     expect(changes.firstWhere((c) => c['change'] == 'add')['path'], 'b.png');
-    expect(changes.firstWhere((c) => c['change'] == 'remove')['path'], 'gone.png');
+    expect(
+      changes.firstWhere((c) => c['change'] == 'remove')['path'],
+      'gone.png',
+    );
   });
 
   test('diffAndClassifyScannedAssets splits unsupported-matched changes', () {
@@ -396,5 +414,146 @@ packages:
     );
     expect(classified.hasUnsupported, isFalse);
     expect(classified.hotChanges, hasLength(1));
+  });
+
+  test('diff drops extensions outside the supported whitelist', () {
+    final baseline = [
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'assets/a.png',
+        size: 1,
+        hash: 'h1',
+      ),
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'assets/fonts/Roboto.ttf',
+        size: 2,
+        hash: 'fold',
+      ),
+    ];
+    final next = [
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'assets/a.png',
+        size: 9,
+        hash: 'h9',
+      ),
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'assets/fonts/Roboto.ttf',
+        size: 3,
+        hash: 'fnew',
+      ),
+      ScannedAsset(
+        package: 'app',
+        packageHash: null,
+        path: 'assets/note.txt',
+        size: 1,
+        hash: 'n1',
+      ),
+    ];
+    final classified = diffAndClassifyScannedAssets(
+      baseline: baseline,
+      next: next,
+      supported: SupportedResourceExtensions.defaults(),
+      unsupported: FlutterPatchIgnore.parse('*.ttf\n'),
+    );
+    expect(classified.hasUnsupported, isFalse);
+    expect(classified.hotChanges, hasLength(1));
+    expect(classified.hotChanges.single['path'], 'assets/a.png');
+  });
+
+  test('auto-ignores extensions outside the supported whitelist', () async {
+    final app = Directory(p.join(tmp.path, 'whitelist_app'))..createSync();
+    File(p.join(app.path, 'pubspec.yaml')).writeAsStringSync('''
+name: whitelist_app
+flutter:
+  assets:
+    - assets/logo.png
+    - assets/note.txt
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: fonts/Roboto.ttf
+''');
+    File(p.join(app.path, 'assets', 'logo.png'))
+      ..createSync(recursive: true)
+      ..writeAsBytesSync([1]);
+    File(p.join(app.path, 'assets', 'note.txt'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync('note');
+    File(p.join(app.path, 'fonts', 'Roboto.ttf'))
+      ..createSync(recursive: true)
+      ..writeAsBytesSync([2]);
+    Directory(p.join(app.path, '.dart_tool')).createSync();
+    File(
+      p.join(app.path, '.dart_tool', 'package_config.json'),
+    ).writeAsStringSync(
+      jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          {'name': 'whitelist_app', 'rootUri': '../', 'packageUri': 'lib/'},
+        ],
+      }),
+    );
+
+    final result = await scanFlutterAssets(
+      appDir: app.path,
+      outPath: p.join(tmp.path, 'whitelist.json'),
+      writeConfig: false,
+    );
+    expect(result.resources.map((r) => r.path), ['assets/logo.png']);
+  });
+
+  test('supported-resources file can opt in extra extensions', () async {
+    final app = Directory(p.join(tmp.path, 'custom_ext_app'))..createSync();
+    File(p.join(app.path, 'pubspec.yaml')).writeAsStringSync('''
+name: custom_ext_app
+flutter:
+  assets:
+    - assets/logo.png
+    - assets/note.txt
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: fonts/Roboto.ttf
+''');
+    File(p.join(app.path, 'assets', 'logo.png'))
+      ..createSync(recursive: true)
+      ..writeAsBytesSync([1]);
+    File(p.join(app.path, 'assets', 'note.txt'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync('note');
+    File(p.join(app.path, 'fonts', 'Roboto.ttf'))
+      ..createSync(recursive: true)
+      ..writeAsBytesSync([2]);
+    File(
+      p.join(app.path, flutterPatchSupportedResourcesFileName),
+    ).writeAsStringSync('png\nttf\n');
+    Directory(p.join(app.path, '.dart_tool')).createSync();
+    File(
+      p.join(app.path, '.dart_tool', 'package_config.json'),
+    ).writeAsStringSync(
+      jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          {'name': 'custom_ext_app', 'rootUri': '../', 'packageUri': 'lib/'},
+        ],
+      }),
+    );
+
+    final result = await scanFlutterAssets(
+      appDir: app.path,
+      outPath: p.join(tmp.path, 'custom_ext.json'),
+      writeConfig: false,
+    );
+    expect(
+      result.resources.map((r) => r.path).toSet(),
+      {'assets/logo.png', 'fonts/Roboto.ttf'},
+    );
   });
 }

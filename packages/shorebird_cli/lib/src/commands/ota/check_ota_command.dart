@@ -148,8 +148,7 @@ class CheckOtaCommand extends ShorebirdCommand {
       final iosDir = platform == 'android' ? null : dirs.ios;
 
       if (results['list-paths'] == true) {
-        final ignore =
-            FlutterPatchIgnore.load(flutterPath, platform: platform);
+        final ignore = FlutterPatchIgnore.load(flutterPath, platform: platform);
         final result = await checkOta(
           flutterDir: flutterPath,
           androidDir: androidDir,
@@ -169,8 +168,9 @@ class CheckOtaCommand extends ShorebirdCommand {
       }
 
       final versionOpt = (results['version'] as String?)?.trim();
-      final version =
-          (versionOpt != null && versionOpt.isNotEmpty) ? versionOpt : null;
+      final version = (versionOpt != null && versionOpt.isNotEmpty)
+          ? versionOpt
+          : null;
 
       OtaSnapshot? serverSnapshot;
       var assetChanges = const <Map<String, Object?>>[];
@@ -179,6 +179,7 @@ class CheckOtaCommand extends ShorebirdCommand {
       int? resNumber;
       String? releaseVersion;
       final ignore = FlutterPatchIgnore.load(flutterPath, platform: platform);
+      final supported = SupportedResourceExtensions.load(flutterPath);
 
       // Always scan local assets for the full inventory. Diff against the
       // server resource baseline only when that baseline exists.
@@ -188,6 +189,7 @@ class CheckOtaCommand extends ShorebirdCommand {
         includeDev: results['include-dev'] == true,
         releaseVersion: version,
         ignore: ignore,
+        supported: supported,
       );
       final resources = <Map<String, Object?>>[
         for (final r in localAssets.resources)
@@ -235,12 +237,15 @@ class CheckOtaCommand extends ShorebirdCommand {
         releaseVersion = version;
 
         if (baseline.resourceAssets.isNotEmpty) {
-          final unsupported =
-              FlutterPatchIgnore.loadUnsupported(flutterPath, platform: platform);
+          final unsupported = FlutterPatchIgnore.loadUnsupported(
+            flutterPath,
+            platform: platform,
+          );
           final classified = diffAndClassifyScannedAssets(
             baseline: baseline.resourceAssets,
             next: localAssets.resources,
             ignore: ignore,
+            supported: supported,
             unsupported: unsupported,
           );
           assetChanges = classified.hotChanges;
@@ -281,8 +286,7 @@ class CheckOtaCommand extends ShorebirdCommand {
         printCheckOtaReport(result);
       }
 
-      final unsupportedOut =
-          (results['unsupported-out'] as String?)?.trim();
+      final unsupportedOut = (results['unsupported-out'] as String?)?.trim();
       if (unsupportedOut != null && unsupportedOut.isNotEmpty) {
         writeUnsupportedFilesJson(result, unsupportedOut);
         if (!isJsonMode) {

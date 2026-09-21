@@ -45,8 +45,10 @@ class ScanAssetsCommand extends ShorebirdCommand {
         help:
             'Print paths that would be included (no JSON write). '
             '.flutterpatchignore excludes paths from the inventory; '
-            '.flutterpatch-unsupported-resources marks paths that cannot be hot-updated '
-            'if they change.',
+            '.flutterpatch-supported-resources whitelists hot-updatable '
+            'extensions (unsupported suffixes are auto-ignored); '
+            '.flutterpatch-unsupported-resources marks paths that cannot be '
+            'hot-updated if they change.',
       );
   }
 
@@ -69,6 +71,10 @@ class ScanAssetsCommand extends ShorebirdCommand {
 
     try {
       final ignore = FlutterPatchIgnore.load(appDir);
+      final supported = SupportedResourceExtensions.load(
+        appDir,
+        ensureFile: !listOnly,
+      );
       final result = await scanFlutterAssets(
         appDir: appDir,
         outPath: results['out'] as String?,
@@ -76,10 +82,12 @@ class ScanAssetsCommand extends ShorebirdCommand {
         releaseVersion: results['version'] as String?,
         writeConfig: !listOnly,
         ignore: ignore,
+        supported: supported,
       );
 
       if (listOnly) {
         printIgnoreNotice(ignore);
+        printSupportedResourcesNotice(supported);
         String? rootName;
         for (final pkg in listScannablePackages(
           appDir: appDir,

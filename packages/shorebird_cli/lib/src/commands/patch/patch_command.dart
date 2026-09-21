@@ -115,11 +115,12 @@ To target the latest release (e.g. the release that was most recently updated) u
         'assets',
         help:
             'Current scan-assets JSON; with --baseline-assets, diffs are '
-            'uploaded as changed_resources on the patch. Paths listed in '
-            '.flutterpatch-unsupported-resources that changed abort the patch (full '
-            'release required). When omitted, shorebird.yaml '
-            'upload_patch_resources: true auto-scans and diffs against the '
-            'server baseline for this release version.',
+            'uploaded as changed_resources on the patch. Only extensions in '
+            '.flutterpatch-supported-resources are compared (others auto-ignored). '
+            'Paths listed in .flutterpatch-unsupported-resources that changed '
+            'abort the patch (full release required). When omitted, '
+            'shorebird.yaml upload_patch_resources: true auto-scans and diffs '
+            'against the server baseline for this release version.',
       )
       ..addOption(
         'baseline-assets',

@@ -39,26 +39,25 @@ class OtaFileEntry {
   final String category;
 
   /// Whether this entry matters for an Android / iOS scoped check.
-  bool isRelevantForPlatform(String? platform) =>
-      isOtaPathRelevantForPlatform(
-        category: category,
-        path: path,
-        platform: platform,
-      );
+  bool isRelevantForPlatform(String? platform) => isOtaPathRelevantForPlatform(
+    category: category,
+    path: path,
+    platform: platform,
+  );
 
   Map<String, dynamic> toJson() => {
-        'path': path,
-        'hash': hash,
-        'size': size,
-        'category': category,
-      };
+    'path': path,
+    'hash': hash,
+    'size': size,
+    'category': category,
+  };
 
   static OtaFileEntry fromJson(Map<String, dynamic> json) => OtaFileEntry(
-        path: json['path'] as String,
-        hash: json['hash'] as String,
-        size: json['size'] as int? ?? 0,
-        category: json['category'] as String,
-      );
+    path: json['path'] as String,
+    hash: json['hash'] as String,
+    size: json['size'] as int? ?? 0,
+    category: json['category'] as String,
+  );
 }
 
 class OtaSnapshot {
@@ -79,20 +78,20 @@ class OtaSnapshot {
   final List<OtaFileEntry> files;
 
   Map<String, String> get hashByKey => {
-        for (final f in files) '${f.category}:${f.path}': f.hash,
-      };
+    for (final f in files) '${f.category}:${f.path}': f.hash,
+  };
 
   Map<String, dynamic> toJson() => {
-        'version': version,
-        'generated_at': generatedAt.toIso8601String(),
-        'paths': {
-          'flutter': flutterDir,
-          if (androidDir != null) 'android': androidDir,
-          if (iosDir != null) 'ios': iosDir,
-        },
-        'summary': _summaryCounts(),
-        'files': files.map((f) => f.toJson()).toList(),
-      };
+    'version': version,
+    'generated_at': generatedAt.toIso8601String(),
+    'paths': {
+      'flutter': flutterDir,
+      if (androidDir != null) 'android': androidDir,
+      if (iosDir != null) 'ios': iosDir,
+    },
+    'summary': _summaryCounts(),
+    'files': files.map((f) => f.toJson()).toList(),
+  };
 
   Map<String, int> _summaryCounts() {
     final counts = <String, int>{};
@@ -110,14 +109,16 @@ class OtaSnapshot {
     final rawFiles = json['files'] as List<dynamic>? ?? const [];
     return OtaSnapshot(
       version: json['version'] as int? ?? 1,
-      generatedAt: DateTime.tryParse(json['generated_at'] as String? ?? '') ??
+      generatedAt:
+          DateTime.tryParse(json['generated_at'] as String? ?? '') ??
           DateTime.now().toUtc(),
       flutterDir: paths['flutter'] as String? ?? '',
       androidDir: paths['android'] as String?,
       iosDir: paths['ios'] as String?,
       files: [
         for (final item in rawFiles)
-          if (item is Map) OtaFileEntry.fromJson(Map<String, dynamic>.from(item)),
+          if (item is Map)
+            OtaFileEntry.fromJson(Map<String, dynamic>.from(item)),
       ],
     );
   }
@@ -156,13 +157,13 @@ class FileChange {
   bool get isBlocking => otaBlockingCategories.contains(category);
 
   Map<String, dynamic> toJson() => {
-        'kind': kind.name,
-        'category': category,
-        'path': path,
-        if (oldHash != null) 'old_hash': oldHash,
-        if (newHash != null) 'new_hash': newHash,
-        'ota_patchable': isPatchable,
-      };
+    'kind': kind.name,
+    'category': category,
+    'path': path,
+    if (oldHash != null) 'old_hash': oldHash,
+    if (newHash != null) 'new_hash': newHash,
+    'ota_patchable': isPatchable,
+  };
 }
 
 /// Result of scanning (and optionally comparing against a baseline).
@@ -230,61 +231,60 @@ class CheckOtaResult {
   }
 
   Map<String, dynamic> toJson() => {
-        'out_path': outPath,
-        if (baselinePath != null) 'baseline_path': baselinePath,
-        if (baselineSource != null) 'baseline_source': baselineSource,
-        if (releaseVersion != null) 'release_version': releaseVersion,
-        if (serverSnapshotNumber != null)
-          'server_snapshot_number': serverSnapshotNumber,
-        if (serverResourceNumber != null)
-          'server_resource_number': serverResourceNumber,
-        'ota_supported': otaSupported,
-        'has_baseline': hasBaseline,
-        'change_count': changes.length,
-        'patchable_change_count': patchableChanges.length,
-        'blocking_change_count': blockingChanges.length,
-        'resource_count': resources.length,
-        'asset_change_count': assetChanges.length,
-        'unsupported_asset_change_count': unsupportedAssetChanges.length,
-        'changes': changes.map((c) => c.toJson()).toList(),
-        'resources': resources,
-        'asset_changes': assetChanges,
-        'unsupported_asset_changes': unsupportedAssetChanges,
-        'snapshot_summary': snapshot._summaryCounts(),
-      };
+    'out_path': outPath,
+    if (baselinePath != null) 'baseline_path': baselinePath,
+    if (baselineSource != null) 'baseline_source': baselineSource,
+    if (releaseVersion != null) 'release_version': releaseVersion,
+    if (serverSnapshotNumber != null)
+      'server_snapshot_number': serverSnapshotNumber,
+    if (serverResourceNumber != null)
+      'server_resource_number': serverResourceNumber,
+    'ota_supported': otaSupported,
+    'has_baseline': hasBaseline,
+    'change_count': changes.length,
+    'patchable_change_count': patchableChanges.length,
+    'blocking_change_count': blockingChanges.length,
+    'resource_count': resources.length,
+    'asset_change_count': assetChanges.length,
+    'unsupported_asset_change_count': unsupportedAssetChanges.length,
+    'changes': changes.map((c) => c.toJson()).toList(),
+    'resources': resources,
+    'asset_changes': assetChanges,
+    'unsupported_asset_changes': unsupportedAssetChanges,
+    'snapshot_summary': snapshot._summaryCounts(),
+  };
 
   /// JSON payload of native/platform (non-OTA) file changes only.
   Map<String, dynamic> unsupportedFilesToJson() => {
-        'ota_supported': otaSupported,
-        'blocking_change_count': blockingChanges.length,
-        'unsupported_asset_change_count': unsupportedAssetChanges.length,
-        'unsupported_files':
-            blockingChanges.map((c) => c.toJson()).toList(),
-        'unsupported_asset_changes': unsupportedAssetChanges,
-      };
+    'ota_supported': otaSupported,
+    'blocking_change_count': blockingChanges.length,
+    'unsupported_asset_change_count': unsupportedAssetChanges.length,
+    'unsupported_files': blockingChanges.map((c) => c.toJson()).toList(),
+    'unsupported_asset_changes': unsupportedAssetChanges,
+  };
 
   /// JSON payload of Dart / Flutter-asset (OTA-patchable) file changes only.
   Map<String, dynamic> supportedFilesToJson() => {
-        'ota_supported': otaSupported,
-        'patchable_change_count': patchableChanges.length,
-        'resource_count': resources.length,
-        'asset_change_count': assetChanges.length,
-        'supported_files': patchableChanges.map((c) => c.toJson()).toList(),
-        'resources': resources,
-        'asset_changes': assetChanges,
-      };
+    'ota_supported': otaSupported,
+    'patchable_change_count': patchableChanges.length,
+    'resource_count': resources.length,
+    'asset_change_count': assetChanges.length,
+    'supported_files': patchableChanges.map((c) => c.toJson()).toList(),
+    'resources': resources,
+    'asset_changes': assetChanges,
+  };
 
   /// JSON payload of the hot-update resource config:
   /// full inventory + incremental changes + unsupported changes.
   Map<String, dynamic> resourcesToJson() => {
-        'ota_supported': otaSupported,
-        'resource_count': resources.length,
-        'resources': resources,
-        'asset_change_count': assetChanges.length,
-        'asset_changes': assetChanges,
-        'unsupported_asset_change_count': unsupportedAssetChanges.length,
-        'unsupported_asset_changes': unsupportedAssetChanges,
-      };
+    'ota_supported': otaSupported,
+    'resource_count': resources.length,
+    'resources': resources,
+    'asset_change_count': assetChanges.length,
+    'asset_changes': assetChanges,
+    'unsupported_asset_change_count': unsupportedAssetChanges.length,
+    'unsupported_asset_changes': unsupportedAssetChanges,
+  };
 }
 
 /// Write [CheckOtaResult.unsupportedFilesToJson] to [path].
@@ -411,15 +411,16 @@ Future<CheckOtaResult> checkOta({
   }
   final scopedPlatform =
       (normalizedPlatform == null || normalizedPlatform.isEmpty)
-          ? null
-          : normalizedPlatform;
+      ? null
+      : normalizedPlatform;
 
   // Platform-scoped checks only scan the matching project tree.
   var android = androidDir == null || androidDir.isEmpty
       ? null
       : p.normalize(p.absolute(androidDir));
-  var ios =
-      iosDir == null || iosDir.isEmpty ? null : p.normalize(p.absolute(iosDir));
+  var ios = iosDir == null || iosDir.isEmpty
+      ? null
+      : p.normalize(p.absolute(iosDir));
   if (scopedPlatform == 'android') {
     ios = null;
   } else if (scopedPlatform == 'ios') {
@@ -437,6 +438,7 @@ Future<CheckOtaResult> checkOta({
 
   final ignoreRules =
       ignore ?? FlutterPatchIgnore.load(flutter, platform: scopedPlatform);
+  final supportedExts = SupportedResourceExtensions.load(flutter);
 
   final packages = listScannablePackages(
     appDir: flutter,
@@ -445,7 +447,11 @@ Future<CheckOtaResult> checkOta({
 
   final files = <OtaFileEntry>[
     ..._scanPackagesDart(packages, ignore: ignoreRules),
-    ..._scanPackagesAssets(packages, ignore: ignoreRules),
+    ..._scanPackagesAssets(
+      packages,
+      ignore: ignoreRules,
+      supported: supportedExts,
+    ),
     ..._scanPackagesNative(
       packages,
       ignore: ignoreRules,
@@ -563,27 +569,33 @@ List<FileChange> compareOtaSnapshots(
     final old = oldMap[key];
     final neu = newMap[key];
     if (old == null && neu != null) {
-      changes.add(FileChange(
-        kind: FileChangeKind.added,
-        category: neu.category,
-        path: neu.path,
-        newHash: neu.hash,
-      ));
+      changes.add(
+        FileChange(
+          kind: FileChangeKind.added,
+          category: neu.category,
+          path: neu.path,
+          newHash: neu.hash,
+        ),
+      );
     } else if (old != null && neu == null) {
-      changes.add(FileChange(
-        kind: FileChangeKind.removed,
-        category: old.category,
-        path: old.path,
-        oldHash: old.hash,
-      ));
+      changes.add(
+        FileChange(
+          kind: FileChangeKind.removed,
+          category: old.category,
+          path: old.path,
+          oldHash: old.hash,
+        ),
+      );
     } else if (old != null && neu != null && old.hash != neu.hash) {
-      changes.add(FileChange(
-        kind: FileChangeKind.modified,
-        category: neu.category,
-        path: neu.path,
-        oldHash: old.hash,
-        newHash: neu.hash,
-      ));
+      changes.add(
+        FileChange(
+          kind: FileChangeKind.modified,
+          category: neu.category,
+          path: neu.path,
+          oldHash: old.hash,
+          newHash: neu.hash,
+        ),
+      );
     }
   }
   return changes;
@@ -655,17 +667,20 @@ List<OtaFileEntry> _scanPackagesDart(
     for (final entity in libDir.listSync(recursive: true, followLinks: false)) {
       if (entity is! File) continue;
       if (!_hasExtension(entity.path, const {'.dart'})) continue;
-      final rel =
-          p.relative(entity.path, from: pkg.rootUri).replaceAll('\\', '/');
+      final rel = p
+          .relative(entity.path, from: pkg.rootUri)
+          .replaceAll('\\', '/');
       if (_shouldSkipPath(rel)) continue;
       final snapPath = _snapshotPath(pkg, rel);
       if (ignore.isIgnoredSnapshotPath(snapPath)) continue;
-      out.add(_hashFile(
-        root: pkg.rootUri,
-        file: entity,
-        category: 'flutter_dart',
-        relativePath: snapPath,
-      ));
+      out.add(
+        _hashFile(
+          root: pkg.rootUri,
+          file: entity,
+          category: 'flutter_dart',
+          relativePath: snapPath,
+        ),
+      );
     }
   }
   return out;
@@ -674,6 +689,7 @@ List<OtaFileEntry> _scanPackagesDart(
 List<OtaFileEntry> _scanPackagesAssets(
   List<ScannablePackage> packages, {
   required FlutterPatchIgnore ignore,
+  required SupportedResourceExtensions supported,
 }) {
   final out = <OtaFileEntry>[];
   final seen = <String>{};
@@ -687,15 +703,18 @@ List<OtaFileEntry> _scanPackagesAssets(
       for (final rel in expandAssetEntry(pkg.rootUri, entry)) {
         final key = _snapshotPath(pkg, rel);
         if (ignore.isIgnoredSnapshotPath(key)) continue;
+        if (!supported.isSupportedPath(rel)) continue;
         if (!seen.add(key)) continue;
         final file = File(p.join(pkg.rootUri, rel));
         if (!file.existsSync()) continue;
-        out.add(_hashFile(
-          root: pkg.rootUri,
-          file: file,
-          category: 'flutter_assets',
-          relativePath: key,
-        ));
+        out.add(
+          _hashFile(
+            root: pkg.rootUri,
+            file: file,
+            category: 'flutter_assets',
+            relativePath: key,
+          ),
+        );
       }
     }
   }
@@ -760,8 +779,14 @@ List<OtaFileEntry> _scanPackagesNative(
 
   // Platform folders to skip entirely under dependency packages.
   final skipPlatformFolders = <String>{
-    if (platform == 'android')
-      ...{'ios', 'darwin', 'macos', 'linux', 'windows', 'web'},
+    if (platform == 'android') ...{
+      'ios',
+      'darwin',
+      'macos',
+      'linux',
+      'windows',
+      'web',
+    },
     if (platform == 'ios') ...{'android', 'macos', 'linux', 'windows', 'web'},
   };
 
@@ -786,8 +811,9 @@ List<OtaFileEntry> _scanPackagesNative(
         }
         if (entity is! File) continue;
         if (!_hasExtension(entity.path, _nativeExt)) continue;
-        final rel =
-            p.relative(entity.path, from: pkg.rootUri).replaceAll('\\', '/');
+        final rel = p
+            .relative(entity.path, from: pkg.rootUri)
+            .replaceAll('\\', '/');
         if (_shouldSkipPath(rel)) continue;
         final snapPath = _snapshotPath(pkg, rel);
         if (ignore.isIgnoredSnapshotPath(snapPath)) continue;
@@ -798,12 +824,14 @@ List<OtaFileEntry> _scanPackagesNative(
         )) {
           continue;
         }
-        out.add(_hashFile(
-          root: pkg.rootUri,
-          file: entity,
-          category: 'flutter_native',
-          relativePath: snapPath,
-        ));
+        out.add(
+          _hashFile(
+            root: pkg.rootUri,
+            file: entity,
+            category: 'flutter_native',
+            relativePath: snapPath,
+          ),
+        );
       }
     }
 
@@ -939,12 +967,14 @@ List<OtaFileEntry> _scanTree({
       final matchExt = _hasExtension(entity.path, includeExt);
       if (!matchName && !matchExt) continue;
 
-      out.add(_hashFile(
-        root: root,
-        file: entity,
-        category: category,
-        relativePath: rel,
-      ));
+      out.add(
+        _hashFile(
+          root: root,
+          file: entity,
+          category: category,
+          relativePath: rel,
+        ),
+      );
     }
   }
 
@@ -958,8 +988,10 @@ OtaFileEntry _hashFile({
   required String category,
   String? relativePath,
 }) {
-  final rel = (relativePath ?? p.relative(file.path, from: root))
-      .replaceAll('\\', '/');
+  final rel = (relativePath ?? p.relative(file.path, from: root)).replaceAll(
+    '\\',
+    '/',
+  );
   final bytes = file.readAsBytesSync();
   return OtaFileEntry(
     path: rel,

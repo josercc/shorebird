@@ -34,19 +34,21 @@ name: demo
 $depsYaml
 flutter:
   assets:
-    - assets/a.txt
+    - assets/a.png
 ''');
     File(p.join(flutter.path, 'lib', 'main.dart'))
       ..createSync(recursive: true)
       ..writeAsStringSync("void main() {}");
-    File(p.join(flutter.path, 'assets', 'a.txt'))
+    File(p.join(flutter.path, 'assets', 'a.png'))
       ..createSync(recursive: true)
       ..writeAsStringSync('asset-v1');
 
     File(p.join(android.path, 'app', 'src', 'main', 'AndroidManifest.xml'))
       ..createSync(recursive: true)
       ..writeAsStringSync('<manifest/>');
-    File(p.join(android.path, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'))
+    File(
+        p.join(android.path, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'),
+      )
       ..createSync(recursive: true)
       ..writeAsStringSync('class MainActivity');
 
@@ -124,12 +126,12 @@ packages:
     expect(result.changes, isEmpty);
     expect(File(out).existsSync(), isTrue);
 
-    final json = jsonDecode(File(out).readAsStringSync()) as Map<String, dynamic>;
+    final json =
+        jsonDecode(File(out).readAsStringSync()) as Map<String, dynamic>;
     expect(json['version'], 2);
     expect(json['files'], isA<List>());
     final categories = {
-      for (final f in json['files'] as List)
-        (f as Map)['category'] as String,
+      for (final f in json['files'] as List) (f as Map)['category'] as String,
     };
     expect(categories.contains('flutter_dart'), isTrue);
     expect(categories.contains('flutter_assets'), isTrue);
@@ -137,45 +139,56 @@ packages:
     expect(categories.contains('ios'), isTrue);
   });
 
-  test('includes dependency dart/assets and treats dep native as blocking', () async {
-    final flutter = await makeApp(withDep: true);
-    final out = p.join(tmp.path, 'snap.json');
+  test(
+    'includes dependency dart/assets and treats dep native as blocking',
+    () async {
+      final flutter = await makeApp(withDep: true);
+      final out = p.join(tmp.path, 'snap.json');
 
-    await checkOta(flutterDir: flutter.path, outPath: out);
+      await checkOta(flutterDir: flutter.path, outPath: out);
 
-    final snap = jsonDecode(File(out).readAsStringSync()) as Map<String, dynamic>;
-    final paths = {
-      for (final f in snap['files'] as List) (f as Map)['path'] as String,
-    };
-    expect(paths, contains('lib/main.dart'));
-    expect(paths, contains('package:dep_pkg/lib/dep.dart'));
-    expect(paths, contains('package:dep_pkg/assets/icon.png'));
-    expect(paths, contains('package:dep_pkg/android/src/main/java/P.java'));
+      final snap =
+          jsonDecode(File(out).readAsStringSync()) as Map<String, dynamic>;
+      final paths = {
+        for (final f in snap['files'] as List) (f as Map)['path'] as String,
+      };
+      expect(paths, contains('lib/main.dart'));
+      expect(paths, contains('package:dep_pkg/lib/dep.dart'));
+      expect(paths, contains('package:dep_pkg/assets/icon.png'));
+      expect(paths, contains('package:dep_pkg/android/src/main/java/P.java'));
 
-    File(p.join(tmp.path, 'dep_pkg', 'lib', 'dep.dart'))
-        .writeAsStringSync('class Dep { int x = 1; }');
+      File(
+        p.join(tmp.path, 'dep_pkg', 'lib', 'dep.dart'),
+      ).writeAsStringSync('class Dep { int x = 1; }');
 
-    final dartResult = await checkOta(flutterDir: flutter.path, outPath: out);
-    expect(dartResult.otaSupported, isTrue);
-    expect(
-      dartResult.patchableChanges.any(
-        (c) => c.path == 'package:dep_pkg/lib/dep.dart',
-      ),
-      isTrue,
-    );
+      final dartResult = await checkOta(flutterDir: flutter.path, outPath: out);
+      expect(dartResult.otaSupported, isTrue);
+      expect(
+        dartResult.patchableChanges.any(
+          (c) => c.path == 'package:dep_pkg/lib/dep.dart',
+        ),
+        isTrue,
+      );
 
-    File(p.join(tmp.path, 'dep_pkg', 'android', 'src', 'main', 'java', 'P.java'))
-        .writeAsStringSync('class P { void x() {} }');
+      File(
+        p.join(tmp.path, 'dep_pkg', 'android', 'src', 'main', 'java', 'P.java'),
+      ).writeAsStringSync('class P { void x() {} }');
 
-    final nativeResult = await checkOta(flutterDir: flutter.path, outPath: out);
-    expect(nativeResult.otaSupported, isFalse);
-    expect(
-      nativeResult.blockingChanges.any(
-        (c) => c.path.contains('package:dep_pkg/') && c.category == 'flutter_native',
-      ),
-      isTrue,
-    );
-  });
+      final nativeResult = await checkOta(
+        flutterDir: flutter.path,
+        outPath: out,
+      );
+      expect(nativeResult.otaSupported, isFalse);
+      expect(
+        nativeResult.blockingChanges.any(
+          (c) =>
+              c.path.contains('package:dep_pkg/') &&
+              c.category == 'flutter_native',
+        ),
+        isTrue,
+      );
+    },
+  );
 
   test('no changes against baseline is not OTA supported', () async {
     final flutter = await makeApp();
@@ -216,9 +229,10 @@ packages:
       outPath: out,
     );
 
-    File(p.join(flutter.path, 'lib', 'main.dart'))
-        .writeAsStringSync("void main() { print('x'); }");
-    File(p.join(flutter.path, 'assets', 'a.txt')).writeAsStringSync('asset-v2');
+    File(
+      p.join(flutter.path, 'lib', 'main.dart'),
+    ).writeAsStringSync("void main() { print('x'); }");
+    File(p.join(flutter.path, 'assets', 'a.png')).writeAsStringSync('asset-v2');
 
     final result = await checkOta(
       flutterDir: flutter.path,
@@ -250,8 +264,9 @@ packages:
       outPath: out,
     );
 
-    File(p.join(android, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'))
-        .writeAsStringSync('class MainActivityChanged');
+    File(
+      p.join(android, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'),
+    ).writeAsStringSync('class MainActivityChanged');
 
     final androidResult = await checkOta(
       flutterDir: flutter.path,
@@ -264,8 +279,9 @@ packages:
     expect(androidResult.blockingChanges.first.category, 'android');
 
     // Reset baseline after write, then change iOS.
-    File(p.join(ios, 'Runner', 'AppDelegate.swift'))
-        .writeAsStringSync('import Flutter\n// changed');
+    File(
+      p.join(ios, 'Runner', 'AppDelegate.swift'),
+    ).writeAsStringSync('import Flutter\n// changed');
 
     final iosResult = await checkOta(
       flutterDir: flutter.path,
@@ -287,8 +303,9 @@ packages:
     await checkOta(flutterDir: flutter.path, outPath: out);
     final before = File(out).readAsStringSync();
 
-    File(p.join(flutter.path, 'lib', 'main.dart'))
-        .writeAsStringSync("void main() { /* v2 */ }");
+    File(
+      p.join(flutter.path, 'lib', 'main.dart'),
+    ).writeAsStringSync("void main() { /* v2 */ }");
 
     final result = await checkOta(
       flutterDir: flutter.path,
@@ -309,8 +326,8 @@ packages:
 
     // Add iOS plugin native under dep so unscoped scans would see it.
     File(
-      p.join(tmp.path, 'dep_pkg', 'ios', 'Classes', 'Plugin.swift'),
-    )
+        p.join(tmp.path, 'dep_pkg', 'ios', 'Classes', 'Plugin.swift'),
+      )
       ..createSync(recursive: true)
       ..writeAsStringSync('class Plugin {}');
 
@@ -323,8 +340,9 @@ packages:
     );
 
     // Change iOS app + Swift plugin — must not block Android OTA check.
-    File(p.join(ios, 'Runner', 'AppDelegate.swift'))
-        .writeAsStringSync('import Flutter\n// ios changed');
+    File(
+      p.join(ios, 'Runner', 'AppDelegate.swift'),
+    ).writeAsStringSync('import Flutter\n// ios changed');
     File(
       p.join(tmp.path, 'dep_pkg', 'ios', 'Classes', 'Plugin.swift'),
     ).writeAsStringSync('class Plugin { func x() {} }');
@@ -404,10 +422,12 @@ packages:
       outPath: out,
     );
 
-    File(p.join(android, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'))
-        .writeAsStringSync('class MainActivityChanged');
-    File(p.join(flutter.path, 'lib', 'main.dart'))
-        .writeAsStringSync("void main() { print('also dart'); }");
+    File(
+      p.join(android, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'),
+    ).writeAsStringSync('class MainActivityChanged');
+    File(
+      p.join(flutter.path, 'lib', 'main.dart'),
+    ).writeAsStringSync("void main() { print('also dart'); }");
 
     final result = await checkOta(
       flutterDir: flutter.path,
@@ -440,8 +460,7 @@ packages:
 
     writeUnsupportedFilesJson(result, unsupportedOut);
     expect(File(unsupportedOut).existsSync(), isTrue);
-    final written =
-        jsonDecode(File(unsupportedOut).readAsStringSync()) as Map;
+    final written = jsonDecode(File(unsupportedOut).readAsStringSync()) as Map;
     expect(written['blocking_change_count'], result.blockingChanges.length);
   });
 
@@ -450,8 +469,9 @@ packages:
     final out = p.join(tmp.path, 'snap.json');
 
     await checkOta(flutterDir: flutter.path, outPath: out);
-    File(p.join(flutter.path, 'lib', 'main.dart'))
-        .writeAsStringSync("void main() { /* v2 */ }");
+    File(
+      p.join(flutter.path, 'lib', 'main.dart'),
+    ).writeAsStringSync("void main() { /* v2 */ }");
 
     final result = await checkOta(flutterDir: flutter.path, outPath: out);
     expect(result.otaSupported, isTrue);
@@ -476,10 +496,12 @@ packages:
       outPath: out,
     );
 
-    File(p.join(android, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'))
-        .writeAsStringSync('class MainActivityChanged');
-    File(p.join(flutter.path, 'lib', 'main.dart'))
-        .writeAsStringSync("void main() { print('also dart'); }");
+    File(
+      p.join(android, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'),
+    ).writeAsStringSync('class MainActivityChanged');
+    File(
+      p.join(flutter.path, 'lib', 'main.dart'),
+    ).writeAsStringSync("void main() { print('also dart'); }");
 
     final result = await checkOta(
       flutterDir: flutter.path,
@@ -513,8 +535,7 @@ packages:
 
     writeSupportedFilesJson(result, supportedOut);
     expect(File(supportedOut).existsSync(), isTrue);
-    final written =
-        jsonDecode(File(supportedOut).readAsStringSync()) as Map;
+    final written = jsonDecode(File(supportedOut).readAsStringSync()) as Map;
     expect(written['patchable_change_count'], result.patchableChanges.length);
   });
 
@@ -528,8 +549,9 @@ packages:
       androidDir: android,
       outPath: out,
     );
-    File(p.join(android, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'))
-        .writeAsStringSync('class MainActivityChanged');
+    File(
+      p.join(android, 'app', 'src', 'main', 'kotlin', 'MainActivity.kt'),
+    ).writeAsStringSync('class MainActivityChanged');
 
     final result = await checkOta(
       flutterDir: flutter.path,
@@ -552,13 +574,13 @@ packages:
     final resourcesOut = p.join(tmp.path, 'resources.json');
 
     await checkOta(flutterDir: flutter.path, outPath: out);
-    File(p.join(flutter.path, 'assets', 'a.txt')).writeAsStringSync('asset-v2');
+    File(p.join(flutter.path, 'assets', 'a.png')).writeAsStringSync('asset-v2');
 
     final resources = [
       {
         'package': 'demo',
         'package_hash': null,
-        'path': 'assets/a.txt',
+        'path': 'assets/a.png',
         'size': 8,
         'hash': 'abc',
       },
@@ -566,7 +588,7 @@ packages:
     final assetChanges = [
       {
         'package': 'demo',
-        'path': 'assets/a.txt',
+        'path': 'assets/a.png',
         'change': 'update',
         'hash': 'abc',
         'size': 8,
@@ -601,8 +623,7 @@ packages:
 
     writeResourcesJson(result, resourcesOut);
     expect(File(resourcesOut).existsSync(), isTrue);
-    final written =
-        jsonDecode(File(resourcesOut).readAsStringSync()) as Map;
+    final written = jsonDecode(File(resourcesOut).readAsStringSync()) as Map;
     expect(written['resource_count'], 1);
     expect(written['resources'], isA<List>());
   });

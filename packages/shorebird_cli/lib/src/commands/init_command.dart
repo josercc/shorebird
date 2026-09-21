@@ -2,12 +2,14 @@ import 'dart:io';
 
 import 'package:collection/collection.dart';
 import 'package:mason_logger/mason_logger.dart';
+import 'package:path/path.dart' as p;
 import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
 import 'package:shorebird_cli/src/common_arguments.dart';
 import 'package:shorebird_cli/src/config/config.dart';
 import 'package:shorebird_cli/src/doctor.dart';
 import 'package:shorebird_cli/src/executables/executables.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
+import 'package:shorebird_cli/src/ota/ignore_rules.dart';
 import 'package:shorebird_cli/src/platform/platform.dart';
 import 'package:shorebird_cli/src/pubspec_editor.dart';
 import 'package:shorebird_cli/src/shorebird_command.dart';
@@ -28,8 +30,7 @@ class InitCommand extends ShorebirdCommand {
       ..addFlag(
         'force',
         abbr: 'f',
-        help:
-            'Initialize the app even if a "shorebird.yaml" already exists.',
+        help: 'Initialize the app even if a "shorebird.yaml" already exists.',
         negatable: false,
       )
       ..addOption(
@@ -100,14 +101,29 @@ Please make sure you are running "flutterpatch init" from within your Flutter pr
       return ExitCode.usage.code;
     }
 
-    // Write base_url first so CodePushClient can resolve hostedUri.
+    final force = results['force'] == true;
+
+    // Capture before any write: hasShorebirdYaml reads the file, so a
+    // freshly-created pending yaml must not count as "already initialized".
+    final hadExistingYaml = shorebirdEnv.hasShorebirdYaml;
     final existing = shorebirdEnv.getShorebirdYaml();
-    _addShorebirdYamlToProject(
-      projectRoot: projectRoot,
-      appId: existing?.appId ?? 'pending',
-      flavors: existing?.flavors,
-      baseUrl: baseUrl,
-    );
+    final existingBaseUrl = existing?.baseUrl?.trim();
+    final existingAppId = existing?.appId.trim() ?? '';
+    final existingIsPlaceholder =
+        existingAppId.isEmpty || existingAppId == 'pending';
+
+    // New project: write a minimal yaml so CodePushClient can resolve
+    // hostedUri. Existing files are never replaced wholesale — only
+    // missing base_url is patched in place (keeps flutter/upload_*/comments).
+    if (!hadExistingYaml) {
+      _addShorebirdYamlToProject(
+        projectRoot: projectRoot,
+        appId: 'pending',
+        baseUrl: baseUrl,
+      );
+    } else if (!force && (existingBaseUrl == null || existingBaseUrl.isEmpty)) {
+      _patchShorebirdYaml(projectRoot: projectRoot, baseUrl: baseUrl);
+    }
 
     final organizationMemberships = await codePushClientWrapper
         .getOrganizationMemberships();
@@ -156,8 +172,6 @@ Please make sure you are running "flutterpatch init" from within your Flutter pr
     } else {
       organization = organizationMemberships.first.organization;
     }
-
-    final force = results['force'] == true;
 
     Set<String>? androidFlavors;
     Set<String>? iosFlavors;
@@ -214,10 +228,15 @@ Please make sure you are running "flutterpatch init" from within your Flutter pr
     final shorebirdYaml = shorebirdEnv.getShorebirdYaml();
     final existingFlavors = shorebirdYaml?.flavors;
     Set<String> newFlavors;
-    if (existingFlavors != null) {
+    // Only treat as "add flavors to existing app" when the yaml was already
+    // present before this run. A freshly-written pending yaml must not trigger
+    // getApp('pending') when flavors are detected on a brand-new project.
+    if (hadExistingYaml && !existingIsPlaceholder && existingFlavors != null) {
       final existingFlavorNames = existingFlavors.keys.toSet();
       newFlavors = productFlavors.difference(existingFlavorNames);
-    } else if (shorebirdYaml != null) {
+    } else if (hadExistingYaml &&
+        !existingIsPlaceholder &&
+        shorebirdYaml != null) {
       // Existing shorebird.yaml without flavors — treat all detected flavors
       // as new so they can be added without resetting the base app_id.
       newFlavors = productFlavors;
@@ -266,107 +285,129 @@ Please make sure you are running "flutterpatch init" from within your Flutter pr
       return ExitCode.success.code;
     }
 
-    if (!force && shorebirdEnv.hasShorebirdYaml) {
-      logger
-        ..err('A "shorebird.yaml" file already exists and seems up-to-date.')
-        ..info(
-          '''If you want to reinitialize, run ${lightCyan.wrap('flutterpatch init --force')}.''',
-        );
-      return ExitCode.software.code;
-    }
+    // Existing, up-to-date shorebird.yaml: skip app creation and do not
+    // overwrite the file. Still ensure local files that init owns.
+    final yamlAlreadyCurrent =
+        !force && hadExistingYaml && !existingIsPlaceholder;
+    if (yamlAlreadyCurrent) {
+      logger.info(
+        'A "shorebird.yaml" file already exists and seems up-to-date. '
+        'Skipping app creation. '
+        'Run ${lightCyan.wrap('flutterpatch init --force')} to reinitialize.',
+      );
+    } else {
+      final String appId;
+      Map<String, String>? flavors;
+      try {
+        final needsConfirmation = !force && shorebirdEnv.canAcceptUserInput;
+        final pubspecName = shorebirdEnv.getPubspecYaml()!.name;
+        var displayName = results['display-name'] as String?;
+        displayName ??= needsConfirmation
+            ? logger.prompt(
+                '${lightGreen.wrap('?')} How should we refer to this app?',
+                defaultValue: pubspecName,
+                hint:
+                    'Pass --display-name=<name> to set the app name without '
+                    'prompting.',
+              )
+            : pubspecName;
+        if (displayName.isEmpty ||
+            displayName.length > CommonArguments.appDisplayNameMaxLength) {
+          logger.err(
+            'App display name must be between 1 and '
+            '${CommonArguments.appDisplayNameMaxLength} characters.',
+          );
+          return ExitCode.usage.code;
+        }
+        final hasNoFlavors = productFlavors.isEmpty;
+        final hasSomeFlavors =
+            productFlavors.isNotEmpty &&
+            ((androidFlavors?.isEmpty ?? false) ||
+                (iosFlavors?.isEmpty ?? false));
 
-    final String appId;
-    Map<String, String>? flavors;
-    try {
-      final needsConfirmation = !force && shorebirdEnv.canAcceptUserInput;
-      final pubspecName = shorebirdEnv.getPubspecYaml()!.name;
-      var displayName = results['display-name'] as String?;
-      displayName ??= needsConfirmation
-          ? logger.prompt(
-              '${lightGreen.wrap('?')} How should we refer to this app?',
-              defaultValue: pubspecName,
-              hint:
-                  'Pass --display-name=<name> to set the app name without '
-                  'prompting.',
-            )
-          : pubspecName;
-      if (displayName.isEmpty ||
-          displayName.length > CommonArguments.appDisplayNameMaxLength) {
-        logger.err(
-          'App display name must be between 1 and '
-          '${CommonArguments.appDisplayNameMaxLength} characters.',
-        );
-        return ExitCode.usage.code;
-      }
-      final hasNoFlavors = productFlavors.isEmpty;
-      final hasSomeFlavors =
-          productFlavors.isNotEmpty &&
-          ((androidFlavors?.isEmpty ?? false) ||
-              (iosFlavors?.isEmpty ?? false));
-
-      if (hasNoFlavors) {
-        // No platforms have any flavors so we just create a single app
-        // and assign it as the default.
-        final app = await codePushClientWrapper.createApp(
-          appName: displayName,
-          organizationId: organization.id,
-        );
-        appId = app.id;
-      } else if (hasSomeFlavors) {
-        // Some platforms have flavors and some do not so we create an app
-        // for the default (no flavor) and then create an app per flavor.
-        final app = await codePushClientWrapper.createApp(
-          appName: displayName,
-          organizationId: organization.id,
-        );
-        appId = app.id;
-        final values = <String, String>{};
-        for (final flavor in productFlavors) {
+        if (hasNoFlavors) {
+          // No platforms have any flavors so we just create a single app
+          // and assign it as the default.
           final app = await codePushClientWrapper.createApp(
-            appName: '$displayName ($flavor)',
+            appName: displayName,
             organizationId: organization.id,
           );
-          values[flavor] = app.id;
-        }
-        flavors = values;
-      } else {
-        // All platforms have flavors so we create an app per flavor
-        // and assign the default to the first flavor.
-        final values = <String, String>{};
-        for (final flavor in productFlavors) {
+          appId = app.id;
+        } else if (hasSomeFlavors) {
+          // Some platforms have flavors and some do not so we create an app
+          // for the default (no flavor) and then create an app per flavor.
           final app = await codePushClientWrapper.createApp(
-            appName: '$displayName ($flavor)',
+            appName: displayName,
             organizationId: organization.id,
           );
-          values[flavor] = app.id;
+          appId = app.id;
+          final values = <String, String>{};
+          for (final flavor in productFlavors) {
+            final app = await codePushClientWrapper.createApp(
+              appName: '$displayName ($flavor)',
+              organizationId: organization.id,
+            );
+            values[flavor] = app.id;
+          }
+          flavors = values;
+        } else {
+          // All platforms have flavors so we create an app per flavor
+          // and assign the default to the first flavor.
+          final values = <String, String>{};
+          for (final flavor in productFlavors) {
+            final app = await codePushClientWrapper.createApp(
+              appName: '$displayName ($flavor)',
+              organizationId: organization.id,
+            );
+            values[flavor] = app.id;
+          }
+          flavors = values;
+          appId = flavors.values.first;
         }
-        flavors = values;
-        appId = flavors.values.first;
+      } on Exception catch (error) {
+        logger.err('$error');
+        return ExitCode.software.code;
       }
-    } on Exception catch (error) {
-      logger.err('$error');
-      return ExitCode.software.code;
+
+      _addShorebirdYamlToProject(
+        projectRoot: projectRoot,
+        appId: appId,
+        flavors: flavors,
+        baseUrl: baseUrl,
+      );
     }
 
-    _addShorebirdYamlToProject(
-      projectRoot: projectRoot,
-      appId: appId,
-      flavors: flavors,
-      baseUrl: baseUrl,
+    final supportedResourcesFile = File(
+      p.join(projectRoot.path, flutterPatchSupportedResourcesFileName),
     );
+    final createdSupportedResources = !supportedResourcesFile.existsSync();
+    ensureSupportedResourcesFile(projectRoot.path);
 
-    if (!shorebirdEnv.pubspecContainsShorebirdYaml) {
+    final addedShorebirdYamlAsset = !shorebirdEnv.pubspecContainsShorebirdYaml;
+    if (addedShorebirdYamlAsset) {
       pubspecEditor.addShorebirdYamlToPubspecAssets();
     }
+
+    final appLines = yamlAlreadyCurrent
+        ? '✅ Existing "shorebird.yaml" kept (app creation skipped).'
+        : '''
+✅ A FlutterPatch app has been created.
+✅ A "shorebird.yaml" has been created (app_id + base_url).''';
+    final supportedLine = createdSupportedResources
+        ? '✅ A ".flutterpatch-supported-resources" whitelist has been created.'
+        : '✅ ".flutterpatch-supported-resources" already exists.';
+    final pubspecLine = addedShorebirdYamlAsset
+        ? '✅ The "pubspec.yaml" has been updated to include "shorebird.yaml" as an asset.'
+        : '✅ "shorebird.yaml" is already listed in pubspec assets.';
 
     logger.info(
       '''
 
 ${lightGreen.wrap('FlutterPatch initialized successfully!')}
 
-✅ A FlutterPatch app has been created.
-✅ A "shorebird.yaml" has been created (app_id + base_url).
-✅ The "pubspec.yaml" has been updated to include "shorebird.yaml" as an asset.
+$appLines
+$supportedLine
+$pubspecLine
 
 Reference the following commands to get started:
 
@@ -409,8 +450,17 @@ Or save a local token for this base_url: ${lightCyan.wrap('flutterpatch account 
     required String baseUrl,
     Map<String, String>? flavors,
   }) {
-    const content =
-        '''
+    if (shorebirdEnv.hasShorebirdYaml) {
+      _patchShorebirdYaml(
+        projectRoot: projectRoot,
+        appId: appId,
+        baseUrl: baseUrl,
+        flavors: flavors,
+      );
+      return ShorebirdYaml(appId: appId, baseUrl: baseUrl, flavors: flavors);
+    }
+
+    const content = '''
 # FlutterPatch / OTA configuration. Checked into version control (not a secret).
 app_id:
 
@@ -443,6 +493,21 @@ base_url:
         .writeAsStringSync(editor.toString());
 
     return ShorebirdYaml(appId: appId, baseUrl: baseUrl, flavors: flavors);
+  }
+
+  /// Update keys on an existing `shorebird.yaml` without replacing the file.
+  void _patchShorebirdYaml({
+    required Directory projectRoot,
+    String? appId,
+    String? baseUrl,
+    Map<String, String>? flavors,
+  }) {
+    final file = shorebirdEnv.getShorebirdYamlFile(cwd: projectRoot);
+    final editor = YamlEditor(file.readAsStringSync());
+    if (appId != null) editor.update(['app_id'], appId);
+    if (baseUrl != null) editor.update(['base_url'], baseUrl);
+    if (flavors != null) editor.update(['flavors'], flavors);
+    file.writeAsStringSync(editor.toString());
   }
 
   void _logAvailableOrganizations(
