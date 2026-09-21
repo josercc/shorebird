@@ -378,6 +378,7 @@ class CodePushClient {
     required String hash,
     String? hashSignature,
     String? podfileLockHash,
+    String? packageName,
     List<Map<String, dynamic>>? changedResources,
     int? resourceNumber,
     bool? force,
@@ -415,6 +416,8 @@ class CodePushClient {
       'content_base64': base64Encode(bytes),
       if (hashSignature != null) 'hash_signature': hashSignature,
       'channel': 'stable',
+      if (packageName != null && packageName.isNotEmpty)
+        'package_name': packageName,
       if (resources != null && resources.isNotEmpty)
         'changed_resources': resources,
       if (resNumber != null) 'resource_number': resNumber,
@@ -611,6 +614,7 @@ class CodePushClient {
     required String releaseVersion,
     required List<int> contentBytes,
     String? platform,
+    String? packageName,
     String channel = 'stable',
     String? notes,
     int? resourceCount,
@@ -630,6 +634,8 @@ class CodePushClient {
         'hash': hash,
         'origin': origin,
         if (platform != null && platform.isNotEmpty) 'platform': platform,
+        if (packageName != null && packageName.isNotEmpty)
+          'package_name': packageName,
         if (resourceCount != null) 'resource_count': resourceCount,
         if (notes != null && notes.isNotEmpty) 'notes': notes,
         if (patchNumber != null) 'patch_number': patchNumber,
@@ -723,6 +729,7 @@ class CodePushClient {
     required String releaseVersion,
     required List<int> contentBytes,
     String? platform,
+    String? packageName,
     String channel = 'stable',
     String? notes,
     int? fileCount,
@@ -742,6 +749,8 @@ class CodePushClient {
         'hash': hash,
         'origin': origin,
         if (platform != null && platform.isNotEmpty) 'platform': platform,
+        if (packageName != null && packageName.isNotEmpty)
+          'package_name': packageName,
         if (fileCount != null) 'file_count': fileCount,
         if (notes != null && notes.isNotEmpty) 'notes': notes,
         if (patchNumber != null) 'patch_number': patchNumber,
@@ -982,6 +991,7 @@ class CodePushClient {
     required String hash,
     required bool canSideload,
     required String? podfileLockHash,
+    String? packageName,
     ArtifactUploadProgressCallback? onUploadProgress,
   }) async {
     final cached = _releases[releaseId];
@@ -1011,6 +1021,8 @@ class CodePushClient {
         'platform': platform.name,
         'arch': arch,
         if (storagePath.isNotEmpty) 'artifact_path': storagePath,
+        if (packageName != null && packageName.isNotEmpty)
+          'package_name': packageName,
         if (cached.flutterRevision.isNotEmpty)
           'flutter_revision': cached.flutterRevision,
         if (cached.flutterVersion != null && cached.flutterVersion!.isNotEmpty)

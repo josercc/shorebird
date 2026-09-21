@@ -656,6 +656,11 @@ Please create a release using "flutterpatch release" and try again.
   }) async {
     final createArtifactProgress = logger.progress('Uploading artifacts');
     final onUploadProgress = _uploadReporter(createArtifactProgress);
+    final packageName = await _resolveStorePackageName(
+      platform: platform,
+      aabPath: aabPath,
+      projectRoot: projectRoot,
+    );
     final archsDir = await ArtifactManager.androidArchsDirectoryFromAab(
       projectRoot: Directory(projectRoot),
       flavor: flavor,
@@ -716,7 +721,7 @@ Looked in:
           hash: hash,
           canSideload: false,
           podfileLockHash: null,
-
+          packageName: packageName,
           onUploadProgress: onUploadProgress,
         );
         uploadedArchCount++;
@@ -765,6 +770,7 @@ to the architectures your project actually builds.''',
         hash: sha256.convert(await File(aabPath).readAsBytes()).toString(),
         canSideload: true,
         podfileLockHash: null,
+        packageName: packageName,
         onUploadProgress: onUploadProgress,
       );
     } on CodePushConflictException catch (_) {
@@ -1004,6 +1010,10 @@ aar artifact already exists, continuing...''');
   }) async {
     final createArtifactProgress = logger.progress('Uploading artifacts');
     final onUploadProgress = _uploadReporter(createArtifactProgress);
+    final packageName = await _resolveStorePackageName(
+      platform: ReleasePlatform.ios,
+      xcarchivePath: xcarchivePath,
+    );
     final thinnedArchiveDirectory = await _thinXcarchive(
       xcarchivePath: xcarchivePath,
     );
@@ -1018,7 +1028,7 @@ aar artifact already exists, continuing...''');
         hash: sha256.convert(await zippedArchive.readAsBytes()).toString(),
         canSideload: false,
         podfileLockHash: podfileLockHash,
-
+        packageName: packageName,
         onUploadProgress: onUploadProgress,
       );
     } catch (error) {
@@ -1041,7 +1051,7 @@ aar artifact already exists, continuing...''');
         hash: sha256.convert(await zippedRunner.readAsBytes()).toString(),
         canSideload: isCodesigned,
         podfileLockHash: podfileLockHash,
-
+        packageName: packageName,
         onUploadProgress: onUploadProgress,
       );
     } catch (error) {
@@ -1833,11 +1843,15 @@ Release artifacts were cloned; re-run baselines manually:
     required Patch patch,
     required ReleasePlatform platform,
     required Map<Arch, PatchArtifactBundle> patchArtifactBundles,
+    String? packageName,
   }) async {
     final createArtifactProgress = logger.progress('Uploading artifacts');
     final progressUpdater = ByteProgressUpdater(
       onUpdate: createArtifactProgress.update,
     );
+    final resolvedPackage =
+        packageName ??
+        await _resolveStorePackageName(platform: platform);
     final total = patchArtifactBundles.length;
     var index = 0;
     for (final artifact in patchArtifactBundles.values) {
@@ -1852,6 +1866,7 @@ Release artifacts were cloned; re-run baselines manually:
           hash: artifact.hash,
           hashSignature: artifact.hashSignature,
           podfileLockHash: artifact.podfileLockHash,
+          packageName: resolvedPackage,
           onUploadProgress: (event) {
             progressUpdater.report(
               label: 'Uploading ${event.label} ($index/$total)',
@@ -1984,6 +1999,7 @@ Release artifacts were cloned; re-run baselines manually:
       patch: patch,
       platform: platform,
       patchArtifactBundles: patchArtifactBundles,
+      packageName: await _resolveStorePackageName(platform: platform),
     );
 
     final channel =
@@ -2027,6 +2043,122 @@ Release artifacts were cloned; re-run baselines manually:
     }
 
     throw ProcessExit(ExitCode.software.code);
+  }
+
+  /// Resolves Android applicationId / iOS Bundle ID for control_api package
+  /// binding (auto-bind or mismatch check on upload).
+  Future<String?> _resolveStorePackageName({
+    required ReleasePlatform platform,
+    String? aabPath,
+    String? xcarchivePath,
+    String? projectRoot,
+  }) async {
+    try {
+      if (platform == ReleasePlatform.android) {
+        if (aabPath != null && aabPath.isNotEmpty && File(aabPath).existsSync()) {
+          final name = (await bundletool.getPackageName(aabPath)).trim();
+          if (name.isNotEmpty) return name;
+        }
+        final root =
+            projectRoot ?? shorebirdEnv.getFlutterProjectRoot()?.path;
+        return _readAndroidApplicationId(root);
+      }
+      if (platform == ReleasePlatform.ios) {
+        if (xcarchivePath != null) {
+          final fromArchive = _readIosBundleIdFromArchive(xcarchivePath);
+          if (fromArchive != null) return fromArchive;
+        }
+        final root =
+            projectRoot ?? shorebirdEnv.getFlutterProjectRoot()?.path;
+        return _readIosBundleIdFromProject(root);
+      }
+    } on Object catch (e) {
+      logger.detail('Could not resolve store package name: $e');
+    }
+    return null;
+  }
+
+  String? _readAndroidApplicationId(String? projectRoot) {
+    if (projectRoot == null || projectRoot.isEmpty) return null;
+    for (final rel in [
+      'android/app/build.gradle.kts',
+      'android/app/build.gradle',
+    ]) {
+      final file = File(p.join(projectRoot, rel));
+      if (!file.existsSync()) continue;
+      final text = file.readAsStringSync();
+      final appId = RegExp(
+        r'''applicationId\s*[= ]\s*["']([^"']+)["']''',
+      ).firstMatch(text)?.group(1);
+      if (appId != null && appId.isNotEmpty) return appId.trim();
+      final ns = RegExp(
+        r'''namespace\s*[= ]\s*["']([^"']+)["']''',
+      ).firstMatch(text)?.group(1);
+      if (ns != null && ns.isNotEmpty) return ns.trim();
+    }
+    return shorebirdEnv.androidPackageName;
+  }
+
+  String? _readIosBundleIdFromArchive(String xcarchivePath) {
+    final rootInfo = File(p.join(xcarchivePath, 'Info.plist'));
+    if (rootInfo.existsSync()) {
+      try {
+        final plist = Plist(file: rootInfo);
+        final props = plist.properties.containsKey(
+              Plist.applicationPropertiesKey,
+            )
+            ? plist.properties[Plist.applicationPropertiesKey]!
+                  as Map<String, Object>
+            : plist.properties;
+        final id = '${props['CFBundleIdentifier'] ?? ''}'.trim();
+        if (id.isNotEmpty && !id.contains(r'$')) return id;
+      } on Object {
+        // try Runner.app below
+      }
+    }
+    final appsDir = Directory(
+      p.join(xcarchivePath, 'Products', 'Applications'),
+    );
+    if (appsDir.existsSync()) {
+      for (final entity in appsDir.listSync()) {
+        if (entity is! Directory || !entity.path.endsWith('.app')) continue;
+        final info = File(p.join(entity.path, 'Info.plist'));
+        if (!info.existsSync()) continue;
+        try {
+          final plist = Plist(file: info);
+          final id = '${plist.properties['CFBundleIdentifier'] ?? ''}'.trim();
+          if (id.isNotEmpty && !id.contains(r'$')) return id;
+        } on Object {
+          // continue
+        }
+      }
+    }
+    return null;
+  }
+
+  String? _readIosBundleIdFromProject(String? projectRoot) {
+    if (projectRoot == null || projectRoot.isEmpty) return null;
+    final info = File(p.join(projectRoot, 'ios', 'Runner', 'Info.plist'));
+    if (info.existsSync()) {
+      try {
+        final plist = Plist(file: info);
+        final id = '${plist.properties['CFBundleIdentifier'] ?? ''}'.trim();
+        if (id.isNotEmpty && !id.contains(r'$')) return id;
+      } on Object {
+        // fall through to pbxproj
+      }
+    }
+    final pbx = File(
+      p.join(projectRoot, 'ios', 'Runner.xcodeproj', 'project.pbxproj'),
+    );
+    if (!pbx.existsSync()) return null;
+    final text = pbx.readAsStringSync();
+    final match = RegExp(
+      r'PRODUCT_BUNDLE_IDENTIFIER\s*=\s*([^;\s]+)\s*;',
+    ).firstMatch(text);
+    final id = match?.group(1)?.trim();
+    if (id == null || id.isEmpty || id.contains(r'$')) return null;
+    return id;
   }
 
   /// Forwards upload byte events to [progress].
