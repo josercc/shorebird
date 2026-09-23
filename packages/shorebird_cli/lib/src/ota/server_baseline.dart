@@ -156,8 +156,27 @@ Future<ServerBaseline> fetchServerBaseline({
           ),
         );
 
-  if (activeRes.isNotEmpty) {
-    resourceMeta = activeRes.first;
+  // Resource baseline is fixed to the release's own base resource snapshot
+  // (`origin=release`). Patch snapshots (`origin=patch`, patch_number>0) are
+  // upload artifacts of a single patch and must never become the baseline of
+  // the next one, otherwise the diff of a later patch collapses to empty.
+  final releaseRes = activeRes.where(_isReleaseResourceSnapshot).toList()
+    ..sort(
+      (a, b) => ((a['number'] as num?)?.toInt() ?? 0).compareTo(
+        (b['number'] as num?)?.toInt() ?? 0,
+      ),
+    );
+
+  if (releaseRes.isEmpty && activeRes.isNotEmpty) {
+    stderr.writeln(
+      'Warning: no origin=release resource baseline for version '
+      '$releaseVersion (${activeRes.length} patch snapshot(s) ignored). '
+      'Run flutterpatch upload-resources for this release.',
+    );
+  }
+
+  if (releaseRes.isNotEmpty) {
+    resourceMeta = releaseRes.last;
     _assertBaselineArtifactHash(
       meta: resourceMeta,
       expectedArtifactHash: expectedArtifactHash,
@@ -223,6 +242,19 @@ Future<ServerBaseline> fetchServerBaseline({
     resourceAssets: resourceAssets,
     resourceMeta: resourceMeta,
   );
+}
+
+/// Whether a resource snapshot row is the release-level baseline.
+///
+/// `origin=release` (or legacy rows without an origin) qualify; anything
+/// carrying a positive `patch_number` or `origin=patch` is a per-patch upload
+/// and is excluded from baseline selection.
+bool _isReleaseResourceSnapshot(Map<String, dynamic> meta) {
+  final patchNumber = (meta['patch_number'] as num?)?.toInt() ?? 0;
+  if (patchNumber > 0) return false;
+  final origin = '${meta['origin'] ?? ''}'.trim().toLowerCase();
+  if (origin.isEmpty) return true;
+  return origin == 'release';
 }
 
 void _assertBaselineArtifactHash({
