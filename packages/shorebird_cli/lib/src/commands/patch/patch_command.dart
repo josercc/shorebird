@@ -153,16 +153,18 @@ To target the latest release (e.g. the release that was most recently updated) u
         'whitelist',
         defaultsTo: false,
         help:
-            'Enable device allowlist for this patch (server-side). '
-            'When enabled with no --unique-ids, no device can update until '
-            'IDs are added. Use --no-whitelist for a full rollout.',
+            'Write client-side allowlist metadata for this patch. '
+            'The server does not block downloads. When enabled with no '
+            '--unique-ids, clients skip until IDs are added. '
+            'Use --no-whitelist so every client may download.',
       )
       ..addMultiOption(
         'unique-ids',
         help:
-            'client_id values allowed to receive this patch when --whitelist '
-            'is on (comma-separated or repeated). Ignored when whitelist is '
-            'off.',
+            'Business ids (e.g. user uid via FlutterPatch.setUniqueId) that '
+            'clients allow when --whitelist is on (comma-separated or '
+            'repeated). Ignored when whitelist is off. Not Shorebird device '
+            'client_id.',
         splitCommas: true,
       )
       ..addOption(

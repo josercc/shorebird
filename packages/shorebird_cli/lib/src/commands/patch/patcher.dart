@@ -247,8 +247,8 @@ More info: ${troubleshootingUrl.toLink()}.
         argResults.wasParsed('whitelist') || _uniqueIds.isNotEmpty;
     if (configureWhitelist && _whitelistEnabled && _uniqueIds.isEmpty) {
       logger.warn(
-        'Whitelist enabled with no --unique-ids: no device can update '
-        'until allowlist IDs are added in the dashboard.',
+        'Whitelist enabled with no --unique-ids: clients will skip this '
+        'patch until allowlist IDs are added (server still serves the patch).',
       );
     }
 
