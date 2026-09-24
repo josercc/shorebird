@@ -172,6 +172,11 @@ More info: ${troubleshootingUrl.toLink()}.
     String? releaseVersion,
   }) async {
     List<Map<String, dynamic>>? changedResources;
+    List<Map<String, dynamic>>? resourcesInventory;
+    String? configFingerprint;
+    // Never bind the release baseline pack number here — control plane assigns
+    // each patch its own resource_number. --resource-number remains an escape
+    // hatch for legacy admin overrides only.
     int? resourceNumber;
 
     final assetsPath = _optionalString('assets');
@@ -210,6 +215,13 @@ More info: ${troubleshootingUrl.toLink()}.
       changedResources = [
         for (final c in changes) Map<String, dynamic>.from(c),
       ];
+      resourcesInventory = [for (final r in next) r.toJson()];
+      if (releaseVersion != null && releaseVersion.isNotEmpty) {
+        configFingerprint = configFingerprintForResources(
+          releaseVersion: releaseVersion,
+          resources: next,
+        );
+      }
     } else if ((shorebirdEnv.getShorebirdYaml()?.uploadPatchResources ??
             false) &&
         releaseVersion != null &&
@@ -220,7 +232,8 @@ More info: ${troubleshootingUrl.toLink()}.
       );
       if (auto != null) {
         changedResources = auto.changedResources;
-        resourceNumber = auto.resourceNumber;
+        resourcesInventory = auto.resources;
+        configFingerprint = auto.configFingerprint;
       }
     }
 
@@ -229,13 +242,15 @@ More info: ${troubleshootingUrl.toLink()}.
       resourceNumber = int.tryParse(resNumRaw.trim());
     }
 
+    // Same changed_resources across successive patches is expected (each patch
+    // owns its own table vs the release baseline). Warn only; do not abort.
     final forceDuplicate = _forceDuplicateResources;
     if (changedResources != null &&
         changedResources.isNotEmpty &&
         !forceDuplicate &&
         releaseVersion != null &&
         releaseVersion.isNotEmpty) {
-      await _assertChangedResourcesNotPublished(
+      await _warnIfChangedResourcesAlreadyPublished(
         appId: appId,
         releaseVersion: releaseVersion,
         changedResources: changedResources,
@@ -260,7 +275,9 @@ More info: ${troubleshootingUrl.toLink()}.
       track: track,
       patchArtifactBundles: artifacts,
       changedResources: changedResources,
+      resources: resourcesInventory,
       resourceNumber: resourceNumber,
+      configFingerprint: configFingerprint,
       force: forceDuplicate,
       whitelistEnabled: configureWhitelist ? _whitelistEnabled : null,
       uniqueIds: configureWhitelist ? _uniqueIds : null,
@@ -444,8 +461,11 @@ More info: ${troubleshootingUrl.toLink()}.
     return out;
   }
 
-  /// Aborts when a published patch already has the same [changedResources].
-  Future<void> _assertChangedResourcesNotPublished({
+  /// Warns when a published patch already has the same [changedResources].
+  ///
+  /// Successive patches may share the same resource diff vs the release
+  /// baseline (each still gets its own resource pack). Do not abort.
+  Future<void> _warnIfChangedResourcesAlreadyPublished({
     required String appId,
     required String releaseVersion,
     required List<Map<String, dynamic>> changedResources,
@@ -466,11 +486,11 @@ More info: ${troubleshootingUrl.toLink()}.
       );
       if (!result.duplicate) continue;
       final number = result.matchingPatchNumber;
-      logger.err(
-        '当前变化配置已发布为补丁 #$number，跳过上传。\n'
-        '使用 --force-duplicate-resources 可强制继续。',
+      logger.warn(
+        '当前变化配置与已发布补丁 #$number 相同；仍会为本补丁创建独立资源表。\n'
+        '（相对 release 基线的 diff 可跨补丁重复。）',
       );
-      throw ProcessExit(ExitCode.software.code);
+      return;
     }
   }
 
@@ -493,7 +513,16 @@ More info: ${troubleshootingUrl.toLink()}.
 
   /// Scans local assets, diffs against the server resource baseline for
   /// [releaseVersion], and optionally uploads add/update files.
-  Future<({List<Map<String, dynamic>> changedResources, int? resourceNumber})?>
+  ///
+  /// Does **not** return the release baseline pack number — each patch's
+  /// `resource_number` is assigned by the control plane.
+  Future<
+    ({
+      List<Map<String, dynamic>> changedResources,
+      List<Map<String, dynamic>> resources,
+      String configFingerprint,
+    })?
+  >
   _resolveAutoPatchResources({
     required String appId,
     required String releaseVersion,
@@ -553,6 +582,11 @@ More info: ${troubleshootingUrl.toLink()}.
         );
       }
 
+      final fingerprint = configFingerprintForResources(
+        releaseVersion: releaseVersion,
+        resources: scanned.resources,
+      );
+
       progress.complete(
         changes.isEmpty
             ? 'No resource changes vs server baseline '
@@ -564,7 +598,8 @@ More info: ${troubleshootingUrl.toLink()}.
         changedResources: [
           for (final c in changes) Map<String, dynamic>.from(c),
         ],
-        resourceNumber: baseline.resourceNumber,
+        resources: [for (final r in scanned.resources) r.toJson()],
+        configFingerprint: fingerprint,
       );
     } on ProcessExit {
       rethrow;

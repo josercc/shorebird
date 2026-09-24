@@ -261,7 +261,8 @@ void main() {
         ).called(1);
       });
 
-      test('exits when compare finds duplicate changed_resources', () async {
+      test('warns when compare finds duplicate changed_resources then publishes',
+          () async {
         final temp = Directory.systemTemp.createTempSync('patch_dedup_');
         addTearDown(() => temp.deleteSync(recursive: true));
         final baseline = File(p.join(temp.path, 'baseline.json'))
@@ -334,39 +335,7 @@ void main() {
             matchingPatchId: 'patch-3',
           ),
         );
-
-        await expectLater(
-          () => runScoped(
-            () async {
-              await patcher.uploadPatchArtifacts(
-                appId: 'test_app_id',
-                releaseId: 42,
-                releaseVersion: '1.0.0+1',
-                metadata: const {},
-                artifacts: {
-                  Arch.arm64: const PatchArtifactBundle(
-                    arch: 'aarch64',
-                    path: '/tmp/a.patch',
-                    hash: 'abc',
-                    size: 1,
-                  ),
-                },
-                track: DeploymentTrack.stable,
-              );
-            },
-            values: {
-              codePushClientWrapperRef.overrideWith(
-                () => codePushClientWrapper,
-              ),
-              shorebirdEnvRef.overrideWith(() => shorebirdEnv),
-              loggerRef.overrideWith(() => logger),
-            },
-          ),
-          throwsA(
-            isA<ProcessExit>().having((e) => e.exitCode, 'exitCode', isNonZero),
-          ),
-        );
-        verifyNever(
+        when(
           () => codePushClientWrapper.publishPatch(
             appId: any(named: 'appId'),
             releaseId: any(named: 'releaseId'),
@@ -374,11 +343,61 @@ void main() {
             platform: any(named: 'platform'),
             track: any(named: 'track'),
             patchArtifactBundles: any(named: 'patchArtifactBundles'),
+            changedResources: any(named: 'changedResources'),
+            resources: any(named: 'resources'),
+            resourceNumber: any(named: 'resourceNumber'),
+            configFingerprint: any(named: 'configFingerprint'),
             force: any(named: 'force'),
+            whitelistEnabled: any(named: 'whitelistEnabled'),
+            uniqueIds: any(named: 'uniqueIds'),
           ),
+        ).thenAnswer((_) async => 4);
+
+        await runScoped(
+          () async {
+            await patcher.uploadPatchArtifacts(
+              appId: 'test_app_id',
+              releaseId: 42,
+              releaseVersion: '1.0.0+1',
+              metadata: const {},
+              artifacts: {
+                Arch.arm64: const PatchArtifactBundle(
+                  arch: 'aarch64',
+                  path: '/tmp/a.patch',
+                  hash: 'abc',
+                  size: 1,
+                ),
+              },
+              track: DeploymentTrack.stable,
+            );
+          },
+          values: {
+            codePushClientWrapperRef.overrideWith(
+              () => codePushClientWrapper,
+            ),
+            shorebirdEnvRef.overrideWith(() => shorebirdEnv),
+            loggerRef.overrideWith(() => logger),
+          },
         );
         verify(
-          () => logger.err(any(that: contains('补丁 #3'))),
+          () => logger.warn(any(that: contains('补丁 #3'))),
+        ).called(1);
+        verify(
+          () => codePushClientWrapper.publishPatch(
+            appId: any(named: 'appId'),
+            releaseId: any(named: 'releaseId'),
+            metadata: any(named: 'metadata'),
+            platform: any(named: 'platform'),
+            track: any(named: 'track'),
+            patchArtifactBundles: any(named: 'patchArtifactBundles'),
+            changedResources: any(named: 'changedResources'),
+            resources: any(named: 'resources'),
+            resourceNumber: any(named: 'resourceNumber'),
+            configFingerprint: any(named: 'configFingerprint'),
+            force: any(named: 'force'),
+            whitelistEnabled: any(named: 'whitelistEnabled'),
+            uniqueIds: any(named: 'uniqueIds'),
+          ),
         ).called(1);
       });
 

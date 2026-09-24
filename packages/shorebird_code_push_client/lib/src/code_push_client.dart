@@ -110,7 +110,9 @@ class _PendingPatch {
     required this.releaseId,
     required this.releaseVersion,
     this.changedResources,
+    this.resources,
     this.resourceNumber,
+    this.configFingerprint,
     this.force = false,
     this.whitelistEnabled,
     this.uniqueIds,
@@ -120,7 +122,10 @@ class _PendingPatch {
   final int releaseId;
   final String releaseVersion;
   final List<Map<String, dynamic>>? changedResources;
+  /// Full asset inventory for this patch (relative to release baseline).
+  final List<Map<String, dynamic>>? resources;
   final int? resourceNumber;
+  final String? configFingerprint;
   final bool force;
   final bool? whitelistEnabled;
   final List<String>? uniqueIds;
@@ -315,16 +320,20 @@ class CodePushClient {
 
   /// Creates a patch record locally; upload happens in [createPatchArtifact].
   ///
-  /// Optional [changedResources] / [resourceNumber] are attached to every
-  /// subsequent [createPatchArtifact] POST for this patch (Flutter asset OTA).
+  /// Optional [changedResources] / [resources] / [configFingerprint] are
+  /// attached to every subsequent [createPatchArtifact] POST for this patch
+  /// (Flutter asset OTA). Do **not** pass the release baseline pack number as
+  /// [resourceNumber] — the control plane assigns each patch its own pack.
   /// When [force] is true, the create request skips duplicate changed_resources
-  /// checks on the control plane.
+  /// checks on the control plane (duplicates are allowed by default now).
   Future<Patch> createPatch({
     required String appId,
     required int releaseId,
     required Json metadata,
     List<Map<String, dynamic>>? changedResources,
+    List<Map<String, dynamic>>? resources,
     int? resourceNumber,
+    String? configFingerprint,
     bool force = false,
     bool? whitelistEnabled,
     List<String>? uniqueIds,
@@ -355,7 +364,9 @@ class CodePushClient {
       releaseId: releaseId,
       releaseVersion: cached.version,
       changedResources: changedResources,
+      resources: resources,
       resourceNumber: resourceNumber,
+      configFingerprint: configFingerprint,
       force: force,
       whitelistEnabled: whitelistEnabled,
       uniqueIds: uniqueIds,
@@ -380,7 +391,9 @@ class CodePushClient {
     String? podfileLockHash,
     String? packageName,
     List<Map<String, dynamic>>? changedResources,
+    List<Map<String, dynamic>>? resources,
     int? resourceNumber,
+    String? configFingerprint,
     bool? force,
     bool? whitelistEnabled,
     List<String>? uniqueIds,
@@ -396,11 +409,17 @@ class CodePushClient {
       );
     }
 
-    final resources = attachChangedResources
+    final changed = attachChangedResources
         ? (changedResources ?? pending.changedResources)
+        : null;
+    final inventory = attachChangedResources
+        ? (resources ?? pending.resources)
         : null;
     final resNumber = attachChangedResources
         ? (resourceNumber ?? pending.resourceNumber)
+        : null;
+    final fingerprint = attachChangedResources
+        ? (configFingerprint ?? pending.configFingerprint)
         : null;
     final forceUpload = force ?? pending.force;
     final whitelistOn = whitelistEnabled ?? pending.whitelistEnabled;
@@ -418,9 +437,13 @@ class CodePushClient {
       'channel': 'stable',
       if (packageName != null && packageName.isNotEmpty)
         'package_name': packageName,
-      if (resources != null && resources.isNotEmpty)
-        'changed_resources': resources,
+      // Always send when resolved (including empty list) so each patch owns
+      // an explicit resource table vs the release baseline.
+      if (changed != null) 'changed_resources': changed,
+      if (inventory != null) 'resources': inventory,
       if (resNumber != null) 'resource_number': resNumber,
+      if (fingerprint != null && fingerprint.isNotEmpty)
+        'config_fingerprint': fingerprint,
       if (forceUpload) 'force': true,
       if (whitelistOn != null) 'whitelist_enabled': whitelistOn,
       if (ids != null) 'unique_ids': ids,

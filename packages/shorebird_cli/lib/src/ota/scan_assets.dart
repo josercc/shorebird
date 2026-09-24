@@ -65,6 +65,35 @@ class ScanAssetsResult {
   };
 }
 
+/// SHA-256 fingerprint of a full resource inventory for a release version.
+///
+/// Used as `config_fingerprint` so devices can reject stale local tables when
+/// the release or patch inventory diverges.
+String configFingerprintForResources({
+  required String releaseVersion,
+  required List<ScannedAsset> resources,
+}) {
+  final items = [
+    for (final r in resources)
+      <String, Object?>{
+        'package': r.package,
+        'path': r.path,
+        'hash': r.hash,
+        'size': r.size,
+        if (r.packageHash != null) 'package_hash': r.packageHash,
+      },
+  ]..sort((a, b) {
+      final byPackage = '${a['package']}'.compareTo('${b['package']}');
+      if (byPackage != 0) return byPackage;
+      return '${a['path']}'.compareTo('${b['path']}');
+    });
+  final payload = <String, Object?>{
+    'release_version': releaseVersion,
+    'resources': items,
+  };
+  return sha256.convert(utf8.encode(jsonEncode(payload))).toString();
+}
+
 /// Scan [appDir] Flutter assets (app + dependency packages) and write JSON.
 ///
 /// Only extensions listed in `.flutterpatch-supported-resources` (or the
