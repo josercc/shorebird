@@ -590,10 +590,13 @@ More info: ${troubleshootingUrl.toLink()}.
       progress.complete(
         changes.isEmpty
             ? 'No resource changes vs server baseline '
-                  '#${baseline.resourceNumber}'
+                  '#${baseline.resourceNumber} '
+                  '(empty table will be published as-is)'
             : 'Prepared ${changes.length} resource change(s) vs baseline '
                   '#${baseline.resourceNumber}',
       );
+      // Always attach the baseline-relative list (may be empty). Empty means
+      // a code-only patch with no hot assets vs the release baseline.
       return (
         changedResources: [
           for (final c in changes) Map<String, dynamic>.from(c),
