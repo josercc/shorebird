@@ -1,13 +1,14 @@
 # FlutterPatch CLI one-click install (Windows PowerShell).
 #
 # Installs the latest packaged CLI into ~/.flutterpatch.
-# If that install already exists, exits without changing anything unless -Force.
-# Flutter SDKs are installed later via `flutterpatch flutter install|use`.
+# If already installed, compares local version with the catalog latest and
+# upgrades when the remote version is greater (unless -Force, which always
+# reinstalls). Flutter SDKs are installed later via `flutterpatch flutter install|use`.
 #
 # Usage:
 #   iwr -UseBasicParsing https://<site>/downloads/install_cli.ps1 | iex
-#   .\scripts\install.ps1              # skip if already installed
-#   .\scripts\install.ps1 -Force       # reinstall / upgrade to latest CLI
+#   .\scripts\install.ps1              # install or upgrade if newer available
+#   .\scripts\install.ps1 -Force       # always reinstall / upgrade to latest CLI
 #
 # Environment:
 #   FLUTTERPATCH_ROOT
@@ -96,10 +97,12 @@ function Resolve-FromCatalog {
     throw "No CLI package for windows-$Arch"
   }
 
-  $sorted = $candidates | Sort-Object {
-    $_.version
-  } -Descending
-  $row = $sorted | Select-Object -First 1
+  $row = $candidates[0]
+  foreach ($c in $candidates) {
+    if ((Compare-SemVer ([string]$c.version) ([string]$row.version)) -eq 1) {
+      $row = $c
+    }
+  }
   if (-not $row.download_url) {
     throw "Catalog row missing download_url"
   }
@@ -108,6 +111,80 @@ function Resolve-FromCatalog {
     Version  = [string]$row.version
     Sha256   = ([string]$row.sha256).ToLower()
     Filename = [string]$row.filename
+  }
+}
+
+function ConvertTo-VersionKey {
+  param([string]$Version)
+  $normalized = ([string]$Version) -replace '^[vV]', '' -replace '-', '.'
+  $parts = @($normalized.Split('.') | ForEach-Object {
+      if ($_ -match '^\d+$') { [int]$_ } else { $_ }
+    })
+  return ,$parts
+}
+
+# Returns -1 / 0 / 1 for a<b / a==b / a>b.
+function Compare-SemVer {
+  param([string]$A, [string]$B)
+  $aa = ConvertTo-VersionKey $A
+  $bb = ConvertTo-VersionKey $B
+  $n = [Math]::Max($aa.Count, $bb.Count)
+  for ($i = 0; $i -lt $n; $i++) {
+    $x = if ($i -lt $aa.Count) { $aa[$i] } else { 0 }
+    $y = if ($i -lt $bb.Count) { $bb[$i] } else { 0 }
+    if ($x -is [int] -and $y -is [int]) {
+      if ($x -lt $y) { return -1 }
+      if ($x -gt $y) { return 1 }
+    } else {
+      $xs = [string]$x
+      $ys = [string]$y
+      if ($xs -lt $ys) { return -1 }
+      if ($xs -gt $ys) { return 1 }
+    }
+  }
+  return 0
+}
+
+function Test-VersionGreaterThan {
+  param([string]$A, [string]$B)
+  return (Compare-SemVer $A $B) -eq 1
+}
+
+function Get-LocalCliVersion {
+  param([string]$ExePath)
+  try {
+    $out = & $ExePath --version 2>$null | Out-String
+  } catch {
+    return ""
+  }
+  $line = ($out -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)
+  if (-not $line) { return "" }
+  if ($line -match '^FlutterPatch\s+([0-9]\S*)') {
+    return $Matches[1]
+  }
+  return ""
+}
+
+function Reset-InstallRootKeepingFlutterCache {
+  param(
+    [string]$Root,
+    [string]$Reason
+  )
+  Write-Host "$Reason; keeping Flutter cache if present…"
+  $keepFlutter = $null
+  $flutterCache = Join-Path $Root "bin\cache\flutter"
+  if (Test-Path $flutterCache) {
+    $keepFlutter = Join-Path $env:TEMP ("flutterpatch-keep-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $keepFlutter | Out-Null
+    Move-Item $flutterCache (Join-Path $keepFlutter "flutter")
+  }
+  Remove-Item -Recurse -Force $Root
+  New-Item -ItemType Directory -Force -Path $Root | Out-Null
+  if ($keepFlutter -and (Test-Path (Join-Path $keepFlutter "flutter"))) {
+    $destCache = Join-Path $Root "bin\cache"
+    New-Item -ItemType Directory -Force -Path $destCache | Out-Null
+    Move-Item (Join-Path $keepFlutter "flutter") (Join-Path $destCache "flutter")
+    Remove-Item -Recurse -Force $keepFlutter -ErrorAction SilentlyContinue
   }
 }
 
@@ -141,33 +218,13 @@ Write-Host "FlutterPatch CLI installer"
 Write-Host "  target: $Root"
 Write-Host "  platform: windows-$Arch"
 
-if ((Test-Path $Exe) -and (-not $Force)) {
-  Write-Host "Install already present at $Root; skipping."
-  Write-Host "  Upgrade CLI:  .\scripts\install.ps1 -Force"
-  Write-Host "  Flutter SDKs: flutterpatch flutter install|use <version>"
-  exit 0
-}
-
-if ($Force -and (Test-Path $Root)) {
-  Write-Host "Reinstalling CLI (-Force); keeping Flutter cache if present…"
-  $keepFlutter = $null
-  $flutterCache = Join-Path $Root "bin\cache\flutter"
-  if (Test-Path $flutterCache) {
-    $keepFlutter = Join-Path $env:TEMP ("flutterpatch-keep-" + [guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Force -Path $keepFlutter | Out-Null
-    Move-Item $flutterCache (Join-Path $keepFlutter "flutter")
-  }
-  Remove-Item -Recurse -Force $Root
-  New-Item -ItemType Directory -Force -Path $Root | Out-Null
-  if ($keepFlutter -and (Test-Path (Join-Path $keepFlutter "flutter"))) {
-    $destCache = Join-Path $Root "bin\cache"
-    New-Item -ItemType Directory -Force -Path $destCache | Out-Null
-    Move-Item (Join-Path $keepFlutter "flutter") (Join-Path $destCache "flutter")
-    Remove-Item -Recurse -Force $keepFlutter -ErrorAction SilentlyContinue
+$localVersion = ""
+if (Test-Path $Exe) {
+  $localVersion = Get-LocalCliVersion -ExePath $Exe
+  if ($localVersion) {
+    Write-Host "  local: $localVersion"
   }
 }
-
-New-Item -ItemType Directory -Force -Path $Root | Out-Null
 
 $work = Join-Path $env:TEMP ("flutterpatch-install-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $work | Out-Null
@@ -175,20 +232,66 @@ try {
   $resolvedVersion = ""
   $cliUrl = if ($Url) { $Url } elseif ($env:FLUTTERPATCH_CLI_URL) { $env:FLUTTERPATCH_CLI_URL } else { "" }
   $archivePath = Join-Path $work "cli.zip"
+  $downloadUrl = ""
+  $sha256 = ""
 
   if ($cliUrl) {
-    Write-Host "Downloading $cliUrl …"
-    Invoke-WebRequest -UseBasicParsing -Uri $cliUrl -OutFile $archivePath
+    $downloadUrl = $cliUrl
   } else {
     Write-Host "Resolving latest package from download catalog…"
     $row = Resolve-FromCatalog -Arch $Arch
+    $downloadUrl = $row.Url
     $resolvedVersion = $row.Version
+    $sha256 = $row.Sha256
+    if ($resolvedVersion) {
+      Write-Host "  latest: $resolvedVersion"
+    }
+  }
+
+  $upgrade = $false
+  if ((Test-Path $Exe) -and (-not $Force)) {
+    if ($cliUrl) {
+      Write-Host "Install already present at $Root; skipping."
+      Write-Host "  Reinstall:    .\scripts\install.ps1 -Force"
+      Write-Host "  Flutter SDKs: flutterpatch flutter install|use <version>"
+      exit 0
+    }
+    if ($localVersion -and $resolvedVersion) {
+      if (Test-VersionGreaterThan $resolvedVersion $localVersion) {
+        Write-Host "Newer version available ($localVersion → $resolvedVersion); upgrading…"
+        $upgrade = $true
+      } else {
+        Write-Host "Already up to date ($localVersion)."
+        Write-Host "  Reinstall:    .\scripts\install.ps1 -Force"
+        Write-Host "  Flutter SDKs: flutterpatch flutter install|use <version>"
+        exit 0
+      }
+    } else {
+      Write-Host "Install already present at $Root; could not compare versions, skipping."
+      Write-Host "  Upgrade CLI:  .\scripts\install.ps1 -Force"
+      Write-Host "  Flutter SDKs: flutterpatch flutter install|use <version>"
+      exit 0
+    }
+  }
+
+  if ($Force -and (Test-Path $Root)) {
+    Reset-InstallRootKeepingFlutterCache -Root $Root -Reason "Reinstalling CLI (-Force)"
+  } elseif ($upgrade -and (Test-Path $Root)) {
+    Reset-InstallRootKeepingFlutterCache -Root $Root -Reason "Upgrading CLI"
+  }
+
+  New-Item -ItemType Directory -Force -Path $Root | Out-Null
+
+  if ($cliUrl) {
+    Write-Host "Downloading $cliUrl …"
+    Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $archivePath
+  } else {
     Write-Host "Downloading FlutterPatch CLI $resolvedVersion (windows-$Arch)…"
-    Invoke-WebRequest -UseBasicParsing -Uri $row.Url -OutFile $archivePath
-    if ($row.Sha256) {
+    Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $archivePath
+    if ($sha256) {
       $hash = (Get-FileHash -Algorithm SHA256 -Path $archivePath).Hash.ToLower()
-      if ($hash -ne $row.Sha256) {
-        throw "sha256 mismatch (expected $($row.Sha256), got $hash)"
+      if ($hash -ne $sha256) {
+        throw "sha256 mismatch (expected $sha256, got $hash)"
       }
     }
   }

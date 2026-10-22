@@ -2,13 +2,14 @@
 # FlutterPatch CLI one-click install (macOS / Linux).
 #
 # Installs the latest packaged CLI into ~/.flutterpatch.
-# If that install already exists, exits without changing anything unless --force.
-# Flutter SDKs are installed later via `flutterpatch flutter install|use`.
+# If already installed, compares local version with the catalog latest and
+# upgrades when the remote version is greater (unless --force, which always
+# reinstalls). Flutter SDKs are installed later via `flutterpatch flutter install|use`.
 #
 # Usage:
 #   curl -fsSL https://<site>/downloads/install_cli.sh | bash
-#   ./scripts/install.sh              # skip if already installed
-#   ./scripts/install.sh --force      # reinstall / upgrade to latest CLI
+#   ./scripts/install.sh              # install or upgrade if newer available
+#   ./scripts/install.sh --force      # always reinstall / upgrade to latest CLI
 #
 # Environment:
 #   FLUTTERPATCH_ROOT                 install dir (default: ~/.flutterpatch)
@@ -28,10 +29,11 @@ usage() {
 FlutterPatch CLI installer
 
 Options:
-  --force     Reinstall / upgrade to the latest CLI (keeps Flutter cache)
+  --force     Always reinstall / upgrade to the latest CLI (keeps Flutter cache)
   -h, --help  Show this help
 
-Without --force, skips if ~/.flutterpatch/bin/flutterpatch already exists.
+Without --force: installs if missing, or upgrades when the catalog latest
+version is greater than the locally installed CLI.
 EOF
 }
 
@@ -458,6 +460,74 @@ normalize_extract_tree() {
   return 1
 }
 
+# Print local CLI version from `flutterpatch --version` (e.g. "1.6.120"), or empty.
+local_cli_version() {
+  local bin="$1"
+  local out
+  out="$("$bin" --version 2>/dev/null || true)"
+  printf '%s' "$out" | head -1 | sed -nE 's/^FlutterPatch[[:space:]]+([0-9][^[:space:]]*).*/\1/p'
+}
+
+# Compare semver-ish strings (strips leading v/V, treats '-' like '.').
+# Echoes -1 / 0 / 1 for a<b / a==b / a>b.
+version_cmp() {
+  local a b
+  a="$(printf '%s' "${1:-}" | sed -E 's/^[vV]//; s/-/./g')"
+  b="$(printf '%s' "${2:-}" | sed -E 's/^[vV]//; s/-/./g')"
+  local -a aa bb
+  IFS='.' read -ra aa <<< "$a"
+  IFS='.' read -ra bb <<< "$b"
+  local i n x y
+  n="${#aa[@]}"
+  (( ${#bb[@]} > n )) && n="${#bb[@]}"
+  for ((i = 0; i < n; i++)); do
+    x="${aa[i]:-0}"
+    y="${bb[i]:-0}"
+    if [[ "$x" =~ ^[0-9]+$ && "$y" =~ ^[0-9]+$ ]]; then
+      if (( 10#$x < 10#$y )); then
+        echo -1
+        return 0
+      fi
+      if (( 10#$x > 10#$y )); then
+        echo 1
+        return 0
+      fi
+    else
+      if [[ "$x" < "$y" ]]; then
+        echo -1
+        return 0
+      fi
+      if [[ "$x" > "$y" ]]; then
+        echo 1
+        return 0
+      fi
+    fi
+  done
+  echo 0
+}
+
+# True if $1 > $2.
+version_gt() {
+  [[ "$(version_cmp "$1" "$2")" == "1" ]]
+}
+
+preserve_flutter_cache_and_reset_root() {
+  local root="$1"
+  local reason="$2"
+  echo "${reason}; keeping Flutter cache if present…"
+  local tmp_keep
+  tmp_keep="$(mktemp -d "${TMPDIR:-/tmp}/flutterpatch-keep.XXXXXX")"
+  if [[ -d "$root/bin/cache/flutter" ]]; then
+    mv "$root/bin/cache/flutter" "$tmp_keep/flutter" || true
+  fi
+  rm -rf "$root"
+  mkdir -p "$root/bin/cache"
+  if [[ -d "$tmp_keep/flutter" ]]; then
+    mv "$tmp_keep/flutter" "$root/bin/cache/flutter"
+  fi
+  rm -rf "$tmp_keep"
+}
+
 # -------------------- main --------------------
 
 OS="$(host_os)"
@@ -475,28 +545,13 @@ echo "FlutterPatch CLI installer"
 echo "  target: $ROOT"
 echo "  platform: ${OS}-${ARCH}"
 
-if [[ -x "$BIN_DIR/flutterpatch" && "$FORCE" != true ]]; then
-  echo "Install already present at $ROOT; skipping."
-  echo "  Upgrade CLI:  ./scripts/install.sh --force"
-  echo "  Flutter SDKs: flutterpatch flutter install|use <version>"
-  exit 0
-fi
-
-if [[ "$FORCE" == true && -d "$ROOT" ]]; then
-  echo "Reinstalling CLI (--force); keeping Flutter cache if present…"
-  TMP_KEEP="$(mktemp -d "${TMPDIR:-/tmp}/flutterpatch-keep.XXXXXX")"
-  if [[ -d "$ROOT/bin/cache/flutter" ]]; then
-    mv "$ROOT/bin/cache/flutter" "$TMP_KEEP/flutter" || true
+LOCAL_VERSION=""
+if [[ -x "$BIN_DIR/flutterpatch" ]]; then
+  LOCAL_VERSION="$(local_cli_version "$BIN_DIR/flutterpatch" || true)"
+  if [[ -n "$LOCAL_VERSION" ]]; then
+    echo "  local: $LOCAL_VERSION"
   fi
-  rm -rf "$ROOT"
-  mkdir -p "$ROOT/bin/cache"
-  if [[ -d "$TMP_KEEP/flutter" ]]; then
-    mv "$TMP_KEEP/flutter" "$ROOT/bin/cache/flutter"
-  fi
-  rm -rf "$TMP_KEEP"
 fi
-
-mkdir -p "$ROOT"
 
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/flutterpatch-install.XXXXXX")"
 cleanup() { rm -rf "$WORKDIR"; }
@@ -505,31 +560,73 @@ trap cleanup EXIT
 ARCHIVE_PATH=""
 RESOLVED_VERSION=""
 RESOLVED_SHA=""
+DOWNLOAD_URL=""
+RESOLVED_NAME=""
 
 if [[ -n "$CLI_URL" ]]; then
+  DOWNLOAD_URL="$CLI_URL"
   case "$CLI_URL" in
     *.zip) ARCHIVE_PATH="$WORKDIR/cli.zip" ;;
     *) ARCHIVE_PATH="$WORKDIR/cli.tar.gz" ;;
   esac
-  echo "Downloading $CLI_URL …"
-  warn_if_proxy_set
-  curl_fp -fL --connect-timeout 15 --max-time 600 --progress-bar -o "$ARCHIVE_PATH" "$CLI_URL"
 else
   echo "Resolving latest package from download catalog…"
-  IFS=$'\t' read -r url resolved_version resolved_sha resolved_name < <(resolve_from_catalog "$OS" "$ARCH")
-  if [[ -z "${url:-}" ]]; then
+  IFS=$'\t' read -r DOWNLOAD_URL RESOLVED_VERSION RESOLVED_SHA RESOLVED_NAME < <(resolve_from_catalog "$OS" "$ARCH")
+  if [[ -z "${DOWNLOAD_URL:-}" ]]; then
     echo "Error: catalog resolve returned an empty download URL" >&2
     exit 1
   fi
-  RESOLVED_VERSION="$resolved_version"
-  RESOLVED_SHA="$resolved_sha"
-  case "${resolved_name:-$url}" in
+  case "${RESOLVED_NAME:-$DOWNLOAD_URL}" in
     *.zip) ARCHIVE_PATH="$WORKDIR/cli.zip" ;;
     *) ARCHIVE_PATH="$WORKDIR/cli.tar.gz" ;;
   esac
+  if [[ -n "$RESOLVED_VERSION" ]]; then
+    echo "  latest: $RESOLVED_VERSION"
+  fi
+fi
+
+UPGRADE=false
+if [[ -x "$BIN_DIR/flutterpatch" && "$FORCE" != true ]]; then
+  if [[ -n "$CLI_URL" ]]; then
+    echo "Install already present at $ROOT; skipping."
+    echo "  Reinstall:    ./scripts/install.sh --force"
+    echo "  Flutter SDKs: flutterpatch flutter install|use <version>"
+    exit 0
+  fi
+  if [[ -n "$LOCAL_VERSION" && -n "$RESOLVED_VERSION" ]]; then
+    if version_gt "$RESOLVED_VERSION" "$LOCAL_VERSION"; then
+      echo "Newer version available ($LOCAL_VERSION → $RESOLVED_VERSION); upgrading…"
+      UPGRADE=true
+    else
+      echo "Already up to date ($LOCAL_VERSION)."
+      echo "  Reinstall:    ./scripts/install.sh --force"
+      echo "  Flutter SDKs: flutterpatch flutter install|use <version>"
+      exit 0
+    fi
+  else
+    echo "Install already present at $ROOT; could not compare versions, skipping."
+    echo "  Upgrade CLI:  ./scripts/install.sh --force"
+    echo "  Flutter SDKs: flutterpatch flutter install|use <version>"
+    exit 0
+  fi
+fi
+
+if [[ "$FORCE" == true && -d "$ROOT" ]]; then
+  preserve_flutter_cache_and_reset_root "$ROOT" "Reinstalling CLI (--force)"
+elif [[ "$UPGRADE" == true && -d "$ROOT" ]]; then
+  preserve_flutter_cache_and_reset_root "$ROOT" "Upgrading CLI"
+fi
+
+mkdir -p "$ROOT"
+
+if [[ -n "$CLI_URL" ]]; then
+  echo "Downloading $CLI_URL …"
+  warn_if_proxy_set
+  curl_fp -fL --connect-timeout 15 --max-time 600 --progress-bar -o "$ARCHIVE_PATH" "$DOWNLOAD_URL"
+else
   echo "Downloading FlutterPatch CLI ${RESOLVED_VERSION:-} (${OS}-${ARCH})…"
   warn_if_proxy_set
-  curl_fp -fL --connect-timeout 15 --max-time 600 --progress-bar -o "$ARCHIVE_PATH" "$url"
+  curl_fp -fL --connect-timeout 15 --max-time 600 --progress-bar -o "$ARCHIVE_PATH" "$DOWNLOAD_URL"
   verify_sha256 "$ARCHIVE_PATH" "$RESOLVED_SHA"
 fi
 
