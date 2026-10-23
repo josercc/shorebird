@@ -90,8 +90,9 @@ Local credentials file: ${auth.credentialsFilePath}''',
         logger.info(
           '''
 Set ${lightCyan.wrap(shorebirdTokenEnvVar)} to an admin or API token,
-or set ${lightCyan.wrap('base_url')} in shorebird.yaml and run
-${lightCyan.wrap('flutterpatch account login')}.''',
+or run ${lightCyan.wrap('flutterpatch account login')}
+(you will be prompted for base_url and token — shorebird.yaml not required).
+Then re-run this command (e.g. ${lightCyan.wrap('flutterpatch init')}).''',
         );
       }
       throw UserNotAuthorizedException();

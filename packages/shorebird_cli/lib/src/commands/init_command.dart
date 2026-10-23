@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:collection/collection.dart';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
+import 'package:shorebird_cli/src/auth/auth.dart';
 import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
 import 'package:shorebird_cli/src/common_arguments.dart';
 import 'package:shorebird_cli/src/config/config.dart';
@@ -59,14 +60,6 @@ class InitCommand extends ShorebirdCommand {
   @override
   Future<int> run() async {
     try {
-      await shorebirdValidator.validatePreconditions(
-        checkUserIsAuthenticated: true,
-      );
-    } on PreconditionFailedException catch (e) {
-      return e.exitCode.code;
-    }
-
-    try {
       if (!shorebirdEnv.hasPubspecYaml) {
         logger.err('''
 Could not find a "pubspec.yaml".
@@ -112,9 +105,10 @@ Please make sure you are running "flutterpatch init" from within your Flutter pr
     final existingIsPlaceholder =
         existingAppId.isEmpty || existingAppId == 'pending';
 
-    // New project: write a minimal yaml so CodePushClient can resolve
-    // hostedUri. Existing files are never replaced wholesale — only
-    // missing base_url is patched in place (keeps flutter/upload_*/comments).
+    // Write base_url before auth so:
+    // 1) CodePushClient can resolve hostedUri
+    // 2) a token saved via `account login --base-url=…` is picked up
+    // 3) if auth fails, plain `account login` can use shorebird.yaml
     if (!hadExistingYaml) {
       _addShorebirdYamlToProject(
         projectRoot: projectRoot,
@@ -123,6 +117,17 @@ Please make sure you are running "flutterpatch init" from within your Flutter pr
       );
     } else if (!force && (existingBaseUrl == null || existingBaseUrl.isEmpty)) {
       _patchShorebirdYaml(projectRoot: projectRoot, baseUrl: baseUrl);
+    }
+
+    // Credentials may have been loaded before yaml existed; refresh now.
+    auth.reloadCredentials();
+
+    try {
+      await shorebirdValidator.validatePreconditions(
+        checkUserIsAuthenticated: true,
+      );
+    } on PreconditionFailedException catch (e) {
+      return e.exitCode.code;
     }
 
     final organizationMemberships = await codePushClientWrapper

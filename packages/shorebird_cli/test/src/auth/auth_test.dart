@@ -250,6 +250,41 @@ void main() {
           throwsA(isA<Exception>()),
         );
       });
+
+      test('writes credentials for explicit url without shorebird.yaml', () {
+        when(() => shorebirdEnv.hostedUri).thenReturn(null);
+        final auth = buildAuth();
+
+        runWithOverrides(
+          () => auth.saveToken(
+            'explicit-token',
+            url: Uri.parse('https://api.example.com'),
+          ),
+        );
+
+        expect(auth.isAuthenticated, isTrue);
+        final stored = jsonDecode(
+          File(auth.credentialsFilePath).readAsStringSync(),
+        ) as Map<String, dynamic>;
+        expect(stored['https://api.example.com'], equals('explicit-token'));
+      });
+    });
+
+    group('reloadCredentials', () {
+      test('picks up local token after base_url becomes available', () {
+        writeCredentials({'https://api.example.com': 'local-token'});
+        when(() => shorebirdEnv.hostedUri).thenReturn(null);
+        final auth = buildAuth();
+        expect(auth.isAuthenticated, isFalse);
+
+        when(
+          () => shorebirdEnv.hostedUri,
+        ).thenReturn(Uri.parse('https://api.example.com'));
+        runWithOverrides(auth.reloadCredentials);
+
+        expect(auth.isAuthenticated, isTrue);
+        expect(auth.email, equals('https://api.example.com'));
+      });
     });
 
     group('login', () {

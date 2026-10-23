@@ -117,10 +117,14 @@ void main() {
           throwsA(isA<UserNotAuthorizedException>()),
         );
         verify(
-          () => logger.info(any(that: contains('https://api.example.com'))),
-        ).called(1);
-        verify(
-          () => logger.info(any(that: contains('account login'))),
+          () => logger.info(
+            any(
+              that: allOf(
+                contains('https://api.example.com'),
+                contains('account login'),
+              ),
+            ),
+          ),
         ).called(1);
       });
 
@@ -145,7 +149,7 @@ void main() {
                 );
                 verifyInOrder([
                   () => logger.err(
-                    '''Unable to find shorebird.yaml. Are you in a shorebird app directory?''',
+                    '''Unable to find shorebird.yaml. Are you in a flutterpatch app directory?''',
                   ),
                   () => logger.info(
                     '''If you have not yet initialized your app, run ${lightCyan.wrap('flutterpatch init')} to get started.''',

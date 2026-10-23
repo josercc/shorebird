@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:platform/platform.dart';
 import 'package:pubspec_parse/pubspec_parse.dart';
 import 'package:scoped_deps/scoped_deps.dart';
+import 'package:shorebird_cli/src/auth/auth.dart';
 import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
 import 'package:shorebird_cli/src/commands/init_command.dart';
 import 'package:shorebird_cli/src/config/config.dart';
@@ -39,6 +40,7 @@ environment:
     const organizationId = 123;
 
     late ArgResults argResults;
+    late Auth auth;
     late Doctor doctor;
     late Gradlew gradlew;
     late CodePushClientWrapper codePushClientWrapper;
@@ -59,6 +61,7 @@ environment:
       return runScoped(
         body,
         values: {
+          authRef.overrideWith(() => auth),
           codePushClientWrapperRef.overrideWith(() => codePushClientWrapper),
           doctorRef.overrideWith(() => doctor),
           gradlewRef.overrideWith(() => gradlew),
@@ -80,6 +83,7 @@ environment:
 
     setUp(() {
       argResults = MockArgResults();
+      auth = MockAuth();
       doctor = MockDoctor();
       gradlew = MockGradlew();
       codePushClientWrapper = MockCodePushClientWrapper();
@@ -94,6 +98,8 @@ environment:
       progress = MockProgress();
       shorebirdEnv = MockShorebirdEnv();
       shorebirdValidator = MockShorebirdValidator();
+
+      when(() => auth.reloadCredentials()).thenReturn(null);
 
       when(() => codePushClientWrapper.getOrganizationMemberships()).thenAnswer(
         (_) async => [

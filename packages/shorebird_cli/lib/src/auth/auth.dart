@@ -158,6 +158,11 @@ class Auth {
   /// Whether a bearer token is available from env or local credentials.
   bool get isAuthenticated => _bearerToken != null;
 
+  /// Re-reads [shorebirdTokenEnvVar] and local credentials for the current
+  /// `base_url`. Call after `shorebird.yaml` is created so a previously saved
+  /// token for that URL becomes visible.
+  void reloadCredentials() => _loadCredentials();
+
   void _loadCredentials() {
     final envToken = platform.environment[shorebirdTokenEnvVar];
     if (envToken != null && envToken.trim().isNotEmpty) {
