@@ -253,32 +253,27 @@ Please make sure you are running "flutterpatch init" from within your Flutter pr
     // and we just need to add the new flavor entries.
     // If the --force flag is present, we will completely reinit the app and
     // don't care about which flavors are new.
+    //
+    // flutterpatch: ownership=FORK — control_api counts one quota slot per
+    // app_id; extra flavors share that id and bind package names at upload.
     if (!force && newFlavors.isNotEmpty) {
       logger.info('New flavors detected: ${newFlavors.join(', ')}');
       final updateShorebirdYamlProgress = logger.progress(
         'Adding flavors to shorebird.yaml',
       );
 
-      final AppMetadata existingApp;
       try {
-        existingApp = await codePushClientWrapper.getApp(
-          appId: shorebirdYaml!.appId,
-        );
+        await codePushClientWrapper.getApp(appId: shorebirdYaml!.appId);
       } on Exception catch (e) {
         updateShorebirdYamlProgress.fail('Failed to get existing app info: $e');
         return ExitCode.software.code;
       }
 
-      final deflavoredAppName = existingApp.displayName
-          .replaceAll(RegExp(r'\(.*\)'), '')
-          .trim();
-      final flavorsToAppIds = shorebirdYaml.flavors ?? {};
+      final flavorsToAppIds = Map<String, String>.from(
+        shorebirdYaml.flavors ?? {},
+      );
       for (final flavor in newFlavors) {
-        final app = await codePushClientWrapper.createApp(
-          appName: '$deflavoredAppName ($flavor)',
-          organizationId: organization.id,
-        );
-        flavorsToAppIds[flavor] = app.id;
+        flavorsToAppIds[flavor] = shorebirdYaml.appId;
       }
       _addShorebirdYamlToProject(
         projectRoot: projectRoot,
@@ -324,50 +319,17 @@ Please make sure you are running "flutterpatch init" from within your Flutter pr
           );
           return ExitCode.usage.code;
         }
-        final hasNoFlavors = productFlavors.isEmpty;
-        final hasSomeFlavors =
-            productFlavors.isNotEmpty &&
-            ((androidFlavors?.isEmpty ?? false) ||
-                (iosFlavors?.isEmpty ?? false));
-
-        if (hasNoFlavors) {
-          // No platforms have any flavors so we just create a single app
-          // and assign it as the default.
-          final app = await codePushClientWrapper.createApp(
-            appName: displayName,
-            organizationId: organization.id,
-          );
-          appId = app.id;
-        } else if (hasSomeFlavors) {
-          // Some platforms have flavors and some do not so we create an app
-          // for the default (no flavor) and then create an app per flavor.
-          final app = await codePushClientWrapper.createApp(
-            appName: displayName,
-            organizationId: organization.id,
-          );
-          appId = app.id;
-          final values = <String, String>{};
-          for (final flavor in productFlavors) {
-            final app = await codePushClientWrapper.createApp(
-              appName: '$displayName ($flavor)',
-              organizationId: organization.id,
-            );
-            values[flavor] = app.id;
-          }
-          flavors = values;
-        } else {
-          // All platforms have flavors so we create an app per flavor
-          // and assign the default to the first flavor.
-          final values = <String, String>{};
-          for (final flavor in productFlavors) {
-            final app = await codePushClientWrapper.createApp(
-              appName: '$displayName ($flavor)',
-              organizationId: organization.id,
-            );
-            values[flavor] = app.id;
-          }
-          flavors = values;
-          appId = flavors.values.first;
+        // flutterpatch: ownership=FORK — one control-plane app for the project.
+        // Product flavors share that app_id; package names auto-bind on upload.
+        final app = await codePushClientWrapper.createApp(
+          appName: displayName,
+          organizationId: organization.id,
+        );
+        appId = app.id;
+        if (productFlavors.isNotEmpty) {
+          flavors = {
+            for (final flavor in productFlavors) flavor: appId,
+          };
         }
       } on Exception catch (error) {
         logger.err('$error');

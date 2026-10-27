@@ -872,17 +872,6 @@ flutter: ../flutter_app
       });
 
       test('creates shorebird for an app with flavors', () async {
-        const appIds = ['test-appId-1', 'test-appId-2'];
-        var index = 0;
-        when(
-          () => codePushClientWrapper.createApp(
-            appName: any(named: 'appName'),
-            organizationId: any(named: 'organizationId'),
-          ),
-        ).thenAnswer((invocation) async {
-          final appName = invocation.namedArguments[#appName] as String?;
-          return App(id: appIds[index++], displayName: appName ?? '-');
-        });
         when(
           () => gradlew.productFlavors(any()),
         ).thenThrow(MissingAndroidProjectException(projectRoot.path));
@@ -900,25 +889,21 @@ flutter: ../flutter_app
           () => shorebirdYamlFile.writeAsStringSync(
             any(
               that: allOf(
-                contains('app_id: ${appIds[0]}'),
+                contains('app_id: $appId'),
                 contains('''
 flavors:
-  internal: ${appIds[0]}
-  stable: ${appIds[1]}'''),
+  internal: $appId
+  stable: $appId'''),
               ),
             ),
           ),
         ).called(1);
-        verifyInOrder([
+        verify(
           () => codePushClientWrapper.createApp(
-            appName: '$appName (internal)',
+            appName: appName,
             organizationId: organizationId,
           ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (stable)',
-            organizationId: organizationId,
-          ),
-        ]);
+        ).called(1);
       });
     });
 
@@ -933,15 +918,6 @@ flavors:
 
     group('creates shorebird.yaml for an app with flavors', () {
       test('android only', () async {
-        final appIds = [
-          'test-appId-1',
-          'test-appId-2',
-          'test-appId-3',
-          'test-appId-4',
-          'test-appId-5',
-          'test-appId-6',
-        ];
-        var index = 0;
         when(() => gradlew.productFlavors(any())).thenAnswer(
           (_) async => {
             'development',
@@ -952,71 +928,33 @@ flavors:
             'stagingInternal',
           },
         );
-        when(
-          () => codePushClientWrapper.createApp(
-            appName: any(named: 'appName'),
-            organizationId: any(named: 'organizationId'),
-          ),
-        ).thenAnswer((invocation) async {
-          final appName = invocation.namedArguments[#appName] as String?;
-          return App(id: appIds[index++], displayName: appName ?? '--');
-        });
         await runWithOverrides(command.run);
         verify(
           () => shorebirdYamlFile.writeAsStringSync(
             any(
               that: allOf(
-                contains('app_id: ${appIds[0]}'),
+                contains('app_id: $appId'),
                 contains('''
 flavors:
-  development: ${appIds[0]}
-  developmentInternal: ${appIds[1]}
-  production: ${appIds[2]}
-  productionInternal: ${appIds[3]}
-  staging: ${appIds[4]}
-  stagingInternal: ${appIds[5]}'''),
+  development: $appId
+  developmentInternal: $appId
+  production: $appId
+  productionInternal: $appId
+  staging: $appId
+  stagingInternal: $appId'''),
               ),
             ),
           ),
         );
-        verifyInOrder([
+        verify(
           () => codePushClientWrapper.createApp(
-            appName: '$appName (development)',
+            appName: appName,
             organizationId: organizationId,
           ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (developmentInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (production)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (productionInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (staging)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (stagingInternal)',
-            organizationId: organizationId,
-          ),
-        ]);
+        ).called(1);
       });
 
       test('ios only', () async {
-        final appIds = [
-          'test-appId-1',
-          'test-appId-2',
-          'test-appId-3',
-          'test-appId-4',
-          'test-appId-5',
-          'test-appId-6',
-        ];
-        var index = 0;
         when(() => apple.flavors(platform: ApplePlatform.ios)).thenReturn({
           'development',
           'developmentInternal',
@@ -1024,15 +962,6 @@ flavors:
           'productionInternal',
           'staging',
           'stagingInternal',
-        });
-        when(
-          () => codePushClientWrapper.createApp(
-            appName: any(named: 'appName'),
-            organizationId: any(named: 'organizationId'),
-          ),
-        ).thenAnswer((invocation) async {
-          final appName = invocation.namedArguments[#appName] as String?;
-          return App(id: appIds[index++], displayName: appName ?? '-');
         });
         when(
           () => gradlew.productFlavors(any()),
@@ -1042,58 +971,28 @@ flavors:
           () => shorebirdYamlFile.writeAsStringSync(
             any(
               that: allOf(
-                contains('app_id: ${appIds[0]}'),
+                contains('app_id: $appId'),
                 contains('''
 flavors:
-  development: ${appIds[0]}
-  developmentInternal: ${appIds[1]}
-  production: ${appIds[2]}
-  productionInternal: ${appIds[3]}
-  staging: ${appIds[4]}
-  stagingInternal: ${appIds[5]}'''),
+  development: $appId
+  developmentInternal: $appId
+  production: $appId
+  productionInternal: $appId
+  staging: $appId
+  stagingInternal: $appId'''),
               ),
             ),
           ),
         );
-        verifyInOrder([
+        verify(
           () => codePushClientWrapper.createApp(
-            appName: '$appName (development)',
+            appName: appName,
             organizationId: organizationId,
           ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (developmentInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (production)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (productionInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (staging)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (stagingInternal)',
-            organizationId: organizationId,
-          ),
-        ]);
+        ).called(1);
       });
 
       test('ios w/flavors and android w/out flavors', () async {
-        final appIds = [
-          'test-appId-1',
-          'test-appId-2',
-          'test-appId-3',
-          'test-appId-4',
-          'test-appId-5',
-          'test-appId-6',
-          'test-appId-7',
-        ];
-        var index = 0;
         when(() => apple.flavors(platform: ApplePlatform.ios)).thenReturn({
           'development',
           'developmentInternal',
@@ -1103,72 +1002,33 @@ flavors:
           'stagingInternal',
         });
         when(() => gradlew.productFlavors(any())).thenAnswer((_) async => {});
-        when(
-          () => codePushClientWrapper.createApp(
-            appName: any(named: 'appName'),
-            organizationId: any(named: 'organizationId'),
-          ),
-        ).thenAnswer((invocation) async {
-          final appName = invocation.namedArguments[#appName] as String?;
-          return App(id: appIds[index++], displayName: appName ?? '--');
-        });
         await runWithOverrides(command.run);
         verify(
           () => shorebirdYamlFile.writeAsStringSync(
             any(
               that: allOf(
-                contains('app_id: ${appIds[0]}'),
+                contains('app_id: $appId'),
                 contains('''
 flavors:
-  development: ${appIds[1]}
-  developmentInternal: ${appIds[2]}
-  production: ${appIds[3]}
-  productionInternal: ${appIds[4]}
-  staging: ${appIds[5]}
-  stagingInternal: ${appIds[6]}'''),
+  development: $appId
+  developmentInternal: $appId
+  production: $appId
+  productionInternal: $appId
+  staging: $appId
+  stagingInternal: $appId'''),
               ),
             ),
           ),
         );
-        verifyInOrder([
+        verify(
           () => codePushClientWrapper.createApp(
-            appName: '$appName (development)',
+            appName: appName,
             organizationId: organizationId,
           ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (developmentInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (production)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (productionInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (staging)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (stagingInternal)',
-            organizationId: organizationId,
-          ),
-        ]);
+        ).called(1);
       });
 
       test('android w/flavors and ios w/out flavors', () async {
-        final appIds = [
-          'test-appId-1',
-          'test-appId-2',
-          'test-appId-3',
-          'test-appId-4',
-          'test-appId-5',
-          'test-appId-6',
-          'test-appId-7',
-        ];
-        var index = 0;
         when(() => apple.flavors(platform: ApplePlatform.ios)).thenReturn({});
         when(() => gradlew.productFlavors(any())).thenAnswer(
           (_) async => {
@@ -1180,70 +1040,33 @@ flavors:
             'stagingInternal',
           },
         );
-        when(
-          () => codePushClientWrapper.createApp(
-            appName: any(named: 'appName'),
-            organizationId: any(named: 'organizationId'),
-          ),
-        ).thenAnswer((invocation) async {
-          final appName = invocation.namedArguments[#appName] as String?;
-          return App(id: appIds[index++], displayName: appName ?? '-');
-        });
         await runWithOverrides(command.run);
         verify(
           () => shorebirdYamlFile.writeAsStringSync(
             any(
               that: allOf(
-                contains('app_id: ${appIds[0]}'),
+                contains('app_id: $appId'),
                 contains('''
 flavors:
-  development: ${appIds[1]}
-  developmentInternal: ${appIds[2]}
-  production: ${appIds[3]}
-  productionInternal: ${appIds[4]}
-  staging: ${appIds[5]}
-  stagingInternal: ${appIds[6]}'''),
+  development: $appId
+  developmentInternal: $appId
+  production: $appId
+  productionInternal: $appId
+  staging: $appId
+  stagingInternal: $appId'''),
               ),
             ),
           ),
         );
-        verifyInOrder([
+        verify(
           () => codePushClientWrapper.createApp(
-            appName: '$appName (development)',
+            appName: appName,
             organizationId: organizationId,
           ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (developmentInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (production)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (productionInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (staging)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (stagingInternal)',
-            organizationId: organizationId,
-          ),
-        ]);
+        ).called(1);
       });
 
       test('ios + android w/same variants', () async {
-        final appIds = [
-          'test-appId-1',
-          'test-appId-2',
-          'test-appId-3',
-          'test-appId-4',
-          'test-appId-5',
-          'test-appId-6',
-        ];
         const variants = {
           'development',
           'developmentInternal',
@@ -1252,80 +1075,39 @@ flavors:
           'staging',
           'stagingInternal',
         };
-        var index = 0;
         when(
           () => gradlew.productFlavors(any()),
         ).thenAnswer((_) async => variants);
         when(
           () => apple.flavors(platform: ApplePlatform.ios),
         ).thenReturn(variants);
-        when(
-          () => codePushClientWrapper.createApp(
-            appName: any(named: 'appName'),
-            organizationId: any(named: 'organizationId'),
-          ),
-        ).thenAnswer((invocation) async {
-          final appName = invocation.namedArguments[#appName] as String?;
-          return App(id: appIds[index++], displayName: appName ?? '-');
-        });
         await runWithOverrides(command.run);
         verify(
           () => shorebirdYamlFile.writeAsStringSync(
             any(
               that: allOf(
-                contains('app_id: ${appIds[0]}'),
+                contains('app_id: $appId'),
                 contains('''
 flavors:
-  development: ${appIds[0]}
-  developmentInternal: ${appIds[1]}
-  production: ${appIds[2]}
-  productionInternal: ${appIds[3]}
-  staging: ${appIds[4]}
-  stagingInternal: ${appIds[5]}'''),
+  development: $appId
+  developmentInternal: $appId
+  production: $appId
+  productionInternal: $appId
+  staging: $appId
+  stagingInternal: $appId'''),
               ),
             ),
           ),
         );
-        verifyInOrder([
+        verify(
           () => codePushClientWrapper.createApp(
-            appName: '$appName (development)',
+            appName: appName,
             organizationId: organizationId,
           ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (developmentInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (production)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (productionInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (staging)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (stagingInternal)',
-            organizationId: organizationId,
-          ),
-        ]);
+        ).called(1);
       });
 
       test('multiple platforms w/different variants', () async {
-        final appIds = [
-          'test-appId-1',
-          'test-appId-2',
-          'test-appId-3',
-          'test-appId-4',
-          'test-appId-5',
-          'test-appId-6',
-          'test-appId-7',
-          'test-appId-8',
-          'test-appId-9',
-        ];
         const androidVariants = {
           'dev',
           'devInternal',
@@ -1345,7 +1127,6 @@ flavors:
           'developmentInternal',
           'production-macos',
         };
-        var index = 0;
         when(
           () => gradlew.productFlavors(any()),
         ).thenAnswer((_) async => androidVariants);
@@ -1355,74 +1136,33 @@ flavors:
         when(
           () => apple.flavors(platform: ApplePlatform.macos),
         ).thenReturn(macosVariants);
-        when(
-          () => codePushClientWrapper.createApp(
-            appName: any(named: 'appName'),
-            organizationId: any(named: 'organizationId'),
-          ),
-        ).thenAnswer((invocation) async {
-          final appName = invocation.namedArguments[#appName] as String?;
-          return App(id: appIds[index++], displayName: appName ?? '-');
-        });
         await runWithOverrides(command.run);
         verify(
           () => shorebirdYamlFile.writeAsStringSync(
             any(
               that: allOf(
-                contains('app_id: test-appId-1'),
+                contains('app_id: $appId'),
                 contains('''
 flavors:
-  dev: test-appId-1
-  devInternal: test-appId-2
-  production: test-appId-3
-  productionInternal: test-appId-4
-  development: test-appId-5
-  developmentInternal: test-appId-6
-  staging: test-appId-7
-  stagingInternal: test-appId-8
-  production-macos: test-appId-9'''),
+  dev: $appId
+  devInternal: $appId
+  production: $appId
+  productionInternal: $appId
+  development: $appId
+  developmentInternal: $appId
+  staging: $appId
+  stagingInternal: $appId
+  production-macos: $appId'''),
               ),
             ),
           ),
         );
-        verifyInOrder([
+        verify(
           () => codePushClientWrapper.createApp(
-            appName: '$appName (dev)',
+            appName: appName,
             organizationId: organizationId,
           ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (devInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (production)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (productionInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (development)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (developmentInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (staging)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (stagingInternal)',
-            organizationId: organizationId,
-          ),
-          () => codePushClientWrapper.createApp(
-            appName: '$appName (production-macos)',
-            organizationId: organizationId,
-          ),
-        ]);
+        ).called(1);
       });
 
       group('with new flavors added to existing no-flavor config', () {
@@ -1445,29 +1185,16 @@ flutter: ../flutter_app
         });
 
         test('creates flavor entries preserving existing app_id', () async {
-          const newAppIds = ['test-appId-dev', 'test-appId-prod'];
-          const existingAppName = 'my-app';
-          var index = 0;
-
           when(
             () => codePushClientWrapper.getApp(appId: any(named: 'appId')),
           ).thenAnswer(
             (_) async => AppMetadata(
               appId: appId,
-              displayName: existingAppName,
+              displayName: 'my-app',
               createdAt: DateTime(2023),
               updatedAt: DateTime(2023),
             ),
           );
-          when(
-            () => codePushClientWrapper.createApp(
-              appName: any(named: 'appName'),
-              organizationId: any(named: 'organizationId'),
-            ),
-          ).thenAnswer((invocation) async {
-            final appName = invocation.namedArguments[#appName] as String?;
-            return App(id: newAppIds[index++], displayName: appName ?? '-');
-          });
 
           final result = await runWithOverrides(command.run);
 
@@ -1475,18 +1202,12 @@ flutter: ../flutter_app
           verify(
             () => logger.info('New flavors detected: dev, prod'),
           ).called(1);
-          verify(
+          verifyNever(
             () => codePushClientWrapper.createApp(
-              appName: '$existingAppName (dev)',
-              organizationId: organizationId,
+              appName: any(named: 'appName'),
+              organizationId: any(named: 'organizationId'),
             ),
-          ).called(1);
-          verify(
-            () => codePushClientWrapper.createApp(
-              appName: '$existingAppName (prod)',
-              organizationId: organizationId,
-            ),
-          ).called(1);
+          );
           verify(
             () => shorebirdYamlFile.writeAsStringSync(
               any(
@@ -1496,8 +1217,8 @@ flutter: ../flutter_app
                   contains('flutter: ../flutter_app'),
                   contains('''
 flavors:
-  dev: test-appId-dev
-  prod: test-appId-prod'''),
+  dev: test_app_id
+  prod: test_app_id'''),
                 ),
               ),
             ),
@@ -1540,9 +1261,7 @@ flavors:
         );
 
         test('creates new flavor entries in shorebird.yaml', () async {
-          const newAppIds = ['test-appId-3', 'test-appId-4'];
           const appName = 'my-app';
-          var index = 0;
 
           when(
             () => codePushClientWrapper.getApp(appId: any(named: 'appId')),
@@ -1554,43 +1273,16 @@ flavors:
               updatedAt: DateTime(2023),
             ),
           );
-          when(
-            () => codePushClientWrapper.createApp(
-              appName: any(named: 'appName'),
-              organizationId: any(named: 'organizationId'),
-            ),
-          ).thenAnswer((invocation) async {
-            final appName = invocation.namedArguments[#appName] as String?;
-            return App(id: newAppIds[index++], displayName: appName ?? '-');
-          });
 
           await runWithOverrides(command.run);
 
           verify(() => logger.info('New flavors detected: c, d')).called(1);
           verifyNever(
             () => codePushClientWrapper.createApp(
-              appName: '$appName (a)',
-              organizationId: organizationId,
+              appName: any(named: 'appName'),
+              organizationId: any(named: 'organizationId'),
             ),
           );
-          verifyNever(
-            () => codePushClientWrapper.createApp(
-              appName: '$appName (b)',
-              organizationId: organizationId,
-            ),
-          );
-          verify(
-            () => codePushClientWrapper.createApp(
-              appName: '$appName (c)',
-              organizationId: organizationId,
-            ),
-          ).called(1);
-          verify(
-            () => codePushClientWrapper.createApp(
-              appName: '$appName (d)',
-              organizationId: organizationId,
-            ),
-          ).called(1);
           verify(
             () => shorebirdYamlFile.writeAsStringSync(
               any(
@@ -1600,8 +1292,8 @@ flavors:
 flavors:
   a: test-appId-1
   b: test-appId-2
-  c: test-appId-3
-  d: test-appId-4'''),
+  c: test_app_id
+  d: test_app_id'''),
                 ),
               ),
             ),
