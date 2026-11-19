@@ -44,18 +44,30 @@ class ByteProgressUpdater {
   DateTime? _lastEmit;
   int _lastPercent = -1;
   String? _lastMessage;
+  Object? _lastProgressKey;
 
   /// Reports [receivedBytes] of [totalBytes] under [label].
+  ///
+  /// When [message] is set it is shown as-is (no auto size suffix).
+  /// When [progressKey] changes (e.g. chunk index), percent throttling resets
+  /// so a new chunk starts emitting from 0% again.
   void report({
     required String label,
     required int receivedBytes,
     int? totalBytes,
+    String? message,
+    Object? progressKey,
   }) {
+    if (progressKey != null && progressKey != _lastProgressKey) {
+      _lastProgressKey = progressKey;
+      _lastPercent = -1;
+    }
     final percent = (totalBytes != null && totalBytes > 0)
         ? (receivedBytes * 100 / totalBytes).floor().clamp(0, 100)
         : null;
-    final message = '$label ${formatByteProgress(receivedBytes, totalBytes)}';
-    if (message == _lastMessage) return;
+    final resolved =
+        message ?? '$label ${formatByteProgress(receivedBytes, totalBytes)}';
+    if (resolved == _lastMessage) return;
 
     final now = DateTime.now();
     if (percent != null) {
@@ -70,8 +82,8 @@ class ByteProgressUpdater {
     }
 
     _lastEmit = now;
-    _lastMessage = message;
-    _onUpdate(message);
+    _lastMessage = resolved;
+    _onUpdate(resolved);
   }
 }
 

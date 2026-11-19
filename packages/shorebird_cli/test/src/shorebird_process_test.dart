@@ -18,7 +18,7 @@ import 'mocks.dart';
 void main() {
   group('ShorebirdProcess', () {
     const flutterStorageBaseUrlEnv = {
-      'FLUTTER_STORAGE_BASE_URL': 'https://download.shorebird.dev',
+      'FLUTTER_STORAGE_BASE_URL': 'https://engine.flutterpatch.cn',
     };
 
     late EngineConfig engineConfig;

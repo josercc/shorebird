@@ -43,6 +43,117 @@ void main() {
       );
     });
 
+    group('listDevices', () {
+      test('parses connected devices from adb devices -l', () async {
+        when(() => process.run(any(), any())).thenAnswer(
+          (_) async => const ShorebirdProcessResult(
+            exitCode: 0,
+            stdout: '''
+List of devices attached
+emulator-5554          device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a
+R58M123ABC             device usb:1-1 product:beyond1qlteue model:SM_G973U device:beyond1q
+offline-device         offline
+''',
+            stderr: '',
+          ),
+        );
+
+        final devices = await runWithOverrides(adb.listDevices);
+        expect(devices, hasLength(2));
+        expect(devices[0].id, 'emulator-5554');
+        expect(devices[0].model, 'sdk gphone64 arm64');
+        expect(devices[1].id, 'R58M123ABC');
+        expect(devices[1].model, 'SM G973U');
+        verify(
+          () => process.run(adbPath, ['devices', '-l']),
+        ).called(1);
+      });
+
+      test('throws when adb fails', () async {
+        when(() => process.run(any(), any())).thenAnswer(
+          (_) async => const ShorebirdProcessResult(
+            exitCode: 1,
+            stdout: '',
+            stderr: 'boom',
+          ),
+        );
+        await expectLater(
+          () => runWithOverrides(adb.listDevices),
+          throwsA(
+            isA<Exception>().having(
+              (e) => e.toString(),
+              'exception()',
+              contains('Unable to list devices: boom'),
+            ),
+          ),
+        );
+      });
+    });
+
+    group('installApk', () {
+      const apkPath = '/tmp/app.apk';
+
+      test('throws when unable to locate adb', () async {
+        when(() => androidSdk.adbPath).thenReturn(null);
+        await expectLater(
+          () => runWithOverrides(() => adb.installApk(apkPath: apkPath)),
+          throwsA(
+            isA<Exception>().having(
+              (e) => e.toString(),
+              'exception()',
+              contains('Unable to locate adb'),
+            ),
+          ),
+        );
+      });
+
+      test('throws when process exits with non-zero exit code', () async {
+        when(() => process.run(any(), any())).thenAnswer(
+          (_) async => const ShorebirdProcessResult(
+            exitCode: 1,
+            stdout: '',
+            stderr: 'oops',
+          ),
+        );
+        await expectLater(
+          () => runWithOverrides(() => adb.installApk(apkPath: apkPath)),
+          throwsA(
+            isA<Exception>().having(
+              (e) => e.toString(),
+              'exception()',
+              contains('Unable to install apk: oops'),
+            ),
+          ),
+        );
+      });
+
+      test('completes when process exits with 0', () async {
+        await expectLater(
+          runWithOverrides(() => adb.installApk(apkPath: apkPath)),
+          completes,
+        );
+        verify(
+          () => process.run(adbPath, 'install -r $apkPath'.split(' ')),
+        ).called(1);
+      });
+
+      test('forwards deviceId when provided', () async {
+        const deviceId = '1234';
+        await expectLater(
+          runWithOverrides(
+            () => adb.installApk(apkPath: apkPath, deviceId: deviceId),
+          ),
+          completes,
+        );
+        verify(
+          () => process.run(
+            adbPath,
+            '-s $deviceId install -r $apkPath'.split(' '),
+          ),
+        ).called(1);
+      });
+    });
+
     group('clearAppData', () {
       const package = 'com.example.app';
       test('throws when unable to locate adb', () async {

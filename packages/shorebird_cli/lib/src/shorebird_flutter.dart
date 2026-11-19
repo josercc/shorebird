@@ -10,6 +10,7 @@ import 'package:scoped_deps/scoped_deps.dart';
 import 'package:shorebird_cli/src/executables/executables.dart';
 import 'package:shorebird_cli/src/extensions/version.dart';
 import 'package:shorebird_cli/src/flutter_version_constraints.dart';
+import 'package:shorebird_cli/src/flutterpatch_mirrors.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/platform.dart';
 import 'package:shorebird_cli/src/shorebird_env.dart';
@@ -32,9 +33,9 @@ class ShorebirdFlutter {
   /// The executable name.
   static const executable = 'flutter';
 
-  /// The Shorebird Flutter fork git URL.
-  static const String flutterGitUrl =
-      'https://github.com/shorebirdtech/flutter.git';
+  /// Flutter fork git URL (default: FlutterPatch Gitee; override via
+  /// [FlutterpatchMirrors.flutterGitUrlEnvKey]).
+  static String get flutterGitUrl => FlutterpatchMirrors.flutterGitUrl;
 
   /// Arguments to pass to `flutter precache`.
   List<String> get precacheArgs => ['--android', if (platform.isMacOS) '--ios'];
@@ -95,26 +96,51 @@ class ShorebirdFlutter {
     required String revision,
     required String? version,
   }) async {
+    final gitUrl = flutterGitUrl;
+    final short = shortRevisionString(revision);
+    logger.info('Flutter git: $gitUrl');
+    logger.info('Flutter revision: $revision ($version)');
     final installProgress = logger.progress(
-      'Installing Flutter $version (${shortRevisionString(revision)})',
+      'Cloning Flutter $version ($short)',
     );
 
     // Carries this instant, so no earlier run's staging directory can share
     // the name and no directory has to be cleared before the clone.
     final stagingDirectory = Directory(_reclaimablePath(targetDirectory.path));
     try {
-      // Clone the Shorebird Flutter repo into the staging directory.
-      await git.clone(
-        url: flutterGitUrl,
-        outputDirectory: stagingDirectory.path,
-        args: ['--filter=tree:0', '--no-checkout'],
+      // Stream clone so desktop / terminal see git --progress (not buffered).
+      final cloneCode = await process.stream(
+        'git',
+        [
+          'clone',
+          gitUrl,
+          '--filter=tree:0',
+          '--no-checkout',
+          '--progress',
+          stagingDirectory.path,
+        ],
       );
+      if (cloneCode != ExitCode.success.code) {
+        throw ProcessException(
+          'git',
+          ['clone', gitUrl],
+          'git clone exited with code $cloneCode',
+          cloneCode,
+        );
+      }
 
       // Checkout the correct revision.
       await git.checkout(directory: stagingDirectory.path, revision: revision);
 
-      stagingDirectory.renameSync(targetDirectory.path);
-      installProgress.complete();
+      // macOS rename fails with errno 66 if the destination already exists and
+      // is non-empty. A long clone can race with leftovers (or a concurrent
+      // Flutter tool writing bin/cache into the target path) — clear unusable
+      // targets before publishing, then retry once.
+      _publishCheckout(
+        stagingDirectory: stagingDirectory,
+        targetDirectory: targetDirectory,
+      );
+      installProgress.complete('Cloned from $gitUrl');
     } catch (error) {
       // Another process publishing the same revision first is not a failure.
       // The winner's checkout is as good, so adopt it. A directory that is
@@ -135,6 +161,46 @@ class ShorebirdFlutter {
       _deleteIgnoringErrors(stagingDirectory);
       rethrow;
     }
+  }
+
+  /// Atomically publishes [stagingDirectory] to [targetDirectory].
+  ///
+  /// Clears an unusable destination first so macOS `rename` does not fail with
+  /// "Directory not empty" after a long Gitee clone.
+  void _publishCheckout({
+    required Directory stagingDirectory,
+    required Directory targetDirectory,
+  }) {
+    void tryRename() => stagingDirectory.renameSync(targetDirectory.path);
+
+    if (targetDirectory.existsSync()) {
+      if (!_isUnusableInstall(targetDirectory)) {
+        // Peer already published a usable checkout.
+        _deleteIgnoringErrors(stagingDirectory);
+        return;
+      }
+      final leftover = shortRevisionString(p.basename(targetDirectory.path));
+      logger.info(
+        'Clearing leftover incomplete Flutter at $leftover before publish…',
+      );
+      _discardUnusableInstall(targetDirectory);
+    }
+
+    try {
+      tryRename();
+      return;
+    } on FileSystemException catch (error) {
+      logger.detail('First publish rename failed: $error — retrying once');
+    }
+
+    if (targetDirectory.existsSync()) {
+      if (!_isUnusableInstall(targetDirectory)) {
+        _deleteIgnoringErrors(stagingDirectory);
+        return;
+      }
+      _discardUnusableInstall(targetDirectory);
+    }
+    tryRename();
   }
 
   void _deleteIgnoringErrors(Directory directory) {
@@ -321,8 +387,20 @@ class ShorebirdFlutter {
       );
     }
 
+    final engineCdn = FlutterpatchMirrors.engineCdnBaseUrl;
+    logger.info('Engine CDN (FLUTTER_STORAGE_BASE_URL): $engineCdn');
+    if (engineCdn == FlutterpatchMirrors.defaultEngineCdnBaseUrl) {
+      logger.info(
+        'Using FlutterPatch engine CDN. '
+        'Override with ${FlutterpatchMirrors.engineCdnEnvKey}='
+        '${FlutterpatchMirrors.officialEngineCdnBaseUrl}',
+      );
+    } else if (engineCdn == FlutterpatchMirrors.officialEngineCdnBaseUrl) {
+      logger.info('Using upstream Shorebird engine CDN (official).');
+    }
+
     final precacheProgress = logger.progress(
-      'Running ${lightCyan.wrap('flutter precache')}',
+      'Running ${lightCyan.wrap('flutter precache')} via $engineCdn',
     );
 
     final precacheArguments = ['precache', ...precacheArgs];
@@ -336,10 +414,11 @@ class ShorebirdFlutter {
       flutterRevisionOverride: revision,
     );
 
-    final ShorebirdProcessResult result;
+    final int precacheCode;
     try {
-      result = await runScoped(
-        () => process.run(
+      // Stream so desktop sees download URLs / progress (not buffered run).
+      precacheCode = await runScoped(
+        () => process.stream(
           executable,
           precacheArguments,
           workingDirectory: targetDirectory.path,
@@ -357,11 +436,10 @@ class ShorebirdFlutter {
       logger.err('$exception');
       throw exception;
     }
-    if (result.exitCode != ExitCode.success.code) {
+    if (precacheCode != ExitCode.success.code) {
       precacheProgress.fail('Failed to precache Flutter $version');
-      final stderr = '${result.stderr}'.trim();
       final exception = CacheCorruptedException(
-        'flutter precache exited with code ${result.exitCode}: $stderr.',
+        'flutter precache exited with code $precacheCode.',
         remedy: 'Run this command again to retry the precache.',
       );
       logger.err('$exception');

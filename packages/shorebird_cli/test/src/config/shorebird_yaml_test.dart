@@ -204,6 +204,86 @@ app_id: test_app_id
       expect(shorebirdYaml.ios, isNull);
     });
 
+    test('can be deserialized with preview android/ios host settings', () {
+      const yaml = '''
+app_id: test_app_id
+preview:
+  android:
+    host_project: ../android_host
+    artifact_dir: release
+    application_id: com.example.host
+    assemble_task: :app:assembleRelease
+    build_number: "2.0"
+  ios:
+    host_project: ../ios_host
+    frameworks_dir: ../ios_host/Flutter
+    scheme: HostApp
+    configuration: Release
+    workspace: HostApp.xcworkspace
+''';
+      final shorebirdYaml = checkedYamlDecode(
+        yaml,
+        (m) => ShorebirdYaml.fromJson(m!),
+      );
+      expect(shorebirdYaml.preview?.android?.hostProject, '../android_host');
+      expect(shorebirdYaml.preview?.android?.artifactDir, 'release');
+      expect(
+        shorebirdYaml.preview?.android?.applicationId,
+        'com.example.host',
+      );
+      expect(
+        shorebirdYaml.preview?.android?.assembleTask,
+        ':app:assembleRelease',
+      );
+      expect(shorebirdYaml.preview?.android?.buildNumber, '2.0');
+      expect(shorebirdYaml.preview?.ios?.hostProject, '../ios_host');
+      expect(
+        shorebirdYaml.preview?.ios?.frameworksDir,
+        '../ios_host/Flutter',
+      );
+      expect(shorebirdYaml.preview?.ios?.scheme, 'HostApp');
+      expect(shorebirdYaml.preview?.ios?.configuration, 'Release');
+      expect(shorebirdYaml.preview?.ios?.workspace, 'HostApp.xcworkspace');
+    });
+
+    test('preview android/ios use defaults for optional fields', () {
+      const yaml = '''
+app_id: test_app_id
+preview:
+  android:
+    host_project: ../android_host
+    artifact_dir: release
+    application_id: com.example.host
+  ios:
+    host_project: ../ios_host
+    frameworks_dir: ../ios_host/Flutter
+    scheme: HostApp
+''';
+      final shorebirdYaml = checkedYamlDecode(
+        yaml,
+        (m) => ShorebirdYaml.fromJson(m!),
+      );
+      expect(
+        shorebirdYaml.preview?.android?.assembleTask,
+        ':app:assembleRelease',
+      );
+      expect(shorebirdYaml.preview?.android?.buildNumber, '1.0');
+      expect(shorebirdYaml.preview?.ios?.configuration, 'Release');
+      expect(shorebirdYaml.preview?.ios?.workspace, isNull);
+      expect(shorebirdYaml.preview?.ios?.xcodeproj, isNull);
+    });
+
+    test('defaults preview to null', () {
+      const yaml = '''
+app_id: test_app_id
+''';
+      final shorebirdYaml = checkedYamlDecode(
+        yaml,
+        (m) => ShorebirdYaml.fromJson(m!),
+      );
+      expect(shorebirdYaml.preview, isNull);
+    });
+
     group('AppIdExtension', () {
       test('getAppId returns base app id when no flavor is provided', () {
         const shorebirdYaml = ShorebirdYaml(appId: 'test_app_id');

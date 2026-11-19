@@ -752,6 +752,39 @@ flutter:
       });
     });
 
+    group('isFlutterModule', () {
+      test('returns false when pubspec has no flutter module', () {
+        final tempDir = Directory.systemTemp.createTempSync();
+        File(
+          p.join(tempDir.path, 'pubspec.yaml'),
+        ).writeAsStringSync('name: test');
+        expect(
+          IOOverrides.runZoned(
+            () => runWithOverrides(() => shorebirdEnv.isFlutterModule),
+            getCurrentDirectory: () => tempDir,
+          ),
+          isFalse,
+        );
+      });
+
+      test('returns true when pubspec declares flutter module', () {
+        final tempDir = Directory.systemTemp.createTempSync();
+        File(p.join(tempDir.path, 'pubspec.yaml')).writeAsStringSync('''
+name: test
+flutter:
+  module:
+    androidPackage: com.example.module
+''');
+        expect(
+          IOOverrides.runZoned(
+            () => runWithOverrides(() => shorebirdEnv.isFlutterModule),
+            getCurrentDirectory: () => tempDir,
+          ),
+          isTrue,
+        );
+      });
+    });
+
     group('flutterRevision', () {
       test('returns correct revision', () {
         const revision = 'test-revision';

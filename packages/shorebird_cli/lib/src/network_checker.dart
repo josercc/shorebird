@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:typed_data';
-
 import 'package:clock/clock.dart';
 import 'package:http/http.dart' as http;
 import 'package:mason_logger/mason_logger.dart';
@@ -8,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:scoped_deps/scoped_deps.dart';
 import 'package:shorebird_cli/src/artifact_manager.dart';
 import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
+import 'package:shorebird_cli/src/flutterpatch_mirrors.dart';
 import 'package:shorebird_cli/src/formatters/formatters.dart';
 import 'package:shorebird_cli/src/http_client/http_client.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
@@ -35,8 +35,8 @@ class NetworkCheckerException implements Exception {
 /// {@endtemplate}
 class NetworkChecker {
   /// The URLs to check for network reachability.
-  static final urlsToCheck = [
-    'https://download.shorebird.dev',
+  static List<Uri> get urlsToCheck => [
+    FlutterpatchMirrors.engineCdnBaseUrl,
   ].map(Uri.parse).toList();
 
   /// Verify that each of [urlsToCheck] responds to an HTTP GET request.

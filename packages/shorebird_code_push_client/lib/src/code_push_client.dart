@@ -180,16 +180,36 @@ class ArtifactUploadProgress {
     required this.label,
     required this.sentBytes,
     required this.totalBytes,
+    this.chunkIndex,
+    this.totalChunks,
+    this.chunkSentBytes,
+    this.chunkTotalBytes,
   });
 
   /// Human-readable name for the artifact (e.g. arch `arm64`).
   final String label;
 
-  /// Request-body bytes written so far.
+  /// Whole-file bytes written so far (across all chunks).
   final int sentBytes;
 
-  /// Total request-body size.
+  /// Whole-file size.
   final int totalBytes;
+
+  /// Zero-based index of the chunk currently uploading, when chunked.
+  final int? chunkIndex;
+
+  /// Total number of chunks, when chunked.
+  final int? totalChunks;
+
+  /// Bytes written so far within the current chunk.
+  final int? chunkSentBytes;
+
+  /// Size of the current chunk.
+  final int? chunkTotalBytes;
+
+  /// Whether this event belongs to a multi-part chunked upload.
+  bool get isChunked =>
+      chunkIndex != null && totalChunks != null && totalChunks! > 0;
 }
 
 /// Callback for artifact upload byte progress.
@@ -219,7 +239,8 @@ class CodePushClient {
            (throw ArgumentError(
              'hostedUri is required. Set base_url in shorebird.yaml.',
            )),
-       _artifactCache = LocalArtifactCache(root: artifactCacheRoot) {
+       _artifactCache = LocalArtifactCache(root: artifactCacheRoot),
+       _uploadRetryBaseDelay = uploadRetryBaseDelay {
     assert(uploadRetryBaseDelay > Duration.zero);
   }
 
@@ -231,7 +252,18 @@ class CodePushClient {
   @visibleForTesting
   static const unknownErrorMessage = 'An unknown error occurred.';
 
+  /// Files larger than this use control_api chunked uploads
+  /// (`POST /admin/v1/uploads` → PUT chunks → complete) instead of a single
+  /// `content_base64` JSON body (avoids proxy / body-size failures).
+  @visibleForTesting
+  static const chunkedUploadThresholdBytes = 2 * 1024 * 1024;
+
+  /// Part size for chunked uploads (matches control_api default of 2 MiB).
+  @visibleForTesting
+  static const uploadChunkBytes = 2 * 1024 * 1024;
+
   final http.Client _httpClient;
+  final Duration _uploadRetryBaseDelay;
 
   /// Base URI for control_api.
   final Uri hostedUri;
@@ -432,7 +464,6 @@ class CodePushClient {
       'platform': platform.name,
       'arch': arch,
       'hash': hash,
-      'content_base64': base64Encode(bytes),
       if (hashSignature != null) 'hash_signature': hashSignature,
       'channel': 'stable',
       if (packageName != null && packageName.isNotEmpty)
@@ -451,11 +482,27 @@ class CodePushClient {
       if (notes != null && notes.isNotEmpty) 'notes': notes,
     };
 
+    // Large binaries: upload parts first, then register the patch by path so
+    // a single JSON body never carries tens of MiB of base64.
+    final useChunked = bytes.length > chunkedUploadThresholdBytes;
+    if (useChunked) {
+      final uploaded = await _uploadArtifactBytes(
+        bytes: bytes,
+        hash: hash,
+        appId: appId,
+        progressLabel: arch,
+        onUploadProgress: onUploadProgress,
+      );
+      body['artifact_path'] = uploaded.path;
+    } else {
+      body['content_base64'] = base64Encode(bytes);
+    }
+
     final response = await _postJson(
       Uri.parse('$_admin/patches'),
       body,
-      progressLabel: arch,
-      onUploadProgress: onUploadProgress,
+      progressLabel: useChunked ? null : arch,
+      onUploadProgress: useChunked ? null : onUploadProgress,
     );
     if (!response.isSuccess) _throw(response);
 
@@ -544,6 +591,17 @@ class CodePushClient {
     ArtifactUploadProgressCallback? onUploadProgress,
   }) async {
     final bytes = await File(artifactPath).readAsBytes();
+    String? preUploadedPath;
+    if (bytes.length > chunkedUploadThresholdBytes) {
+      final uploaded = await _uploadArtifactBytes(
+        bytes: bytes,
+        hash: hash,
+        appId: appId,
+        progressLabel: arch,
+        onUploadProgress: onUploadProgress,
+      );
+      preUploadedPath = uploaded.path;
+    }
     final response = await _postJson(
       Uri.parse('$_admin/patches'),
       {
@@ -552,20 +610,24 @@ class CodePushClient {
         'platform': platform.name,
         'arch': arch,
         'hash': hash,
-        'content_base64': base64Encode(bytes),
+        if (preUploadedPath != null)
+          'artifact_path': preUploadedPath
+        else
+          'content_base64': base64Encode(bytes),
         'channel': 'stable',
         'number': number,
         'force': true,
         if (notes != null && notes.isNotEmpty) 'notes': notes,
       },
-      progressLabel: arch,
-      onUploadProgress: onUploadProgress,
+      progressLabel: preUploadedPath != null ? null : arch,
+      onUploadProgress: preUploadedPath != null ? null : onUploadProgress,
     );
     if (!response.isSuccess) _throw(response);
     final created = await _json(response);
     final storagePath =
         (created['artifact_path'] as String?)?.trim() ??
         (created['path'] as String?)?.trim() ??
+        preUploadedPath ??
         '';
     await _artifactCache.write(
       file: _artifactCache.patchFile(
@@ -1025,15 +1087,14 @@ class CodePushClient {
     }
 
     final bytes = await File(artifactPath).readAsBytes();
-    final upload = await _postJson(
-      Uri.parse('$_admin/artifacts'),
-      {'content_base64': base64Encode(bytes)},
+    final uploaded = await _uploadArtifactBytes(
+      bytes: bytes,
+      hash: hash.isNotEmpty ? hash : null,
+      appId: appId,
       progressLabel: arch,
       onUploadProgress: onUploadProgress,
     );
-    if (!upload.isSuccess) _throw(upload);
-    final uploaded = await _json(upload);
-    final storagePath = uploaded['path'] as String? ?? '';
+    final storagePath = uploaded.path;
 
     final register = await _httpClient.post(
       Uri.parse('$_admin/releases'),
@@ -1616,6 +1677,171 @@ class CodePushClient {
       );
     }
     return bytes;
+  }
+
+
+  /// Uploads raw bytes to control_api storage.
+  ///
+  /// Small payloads use `POST /admin/v1/artifacts` with `content_base64`.
+  /// Larger payloads use chunked upload (`/admin/v1/uploads`) so reverse
+  /// proxies with small `client_max_body_size` do not reject the request.
+  Future<({String path, String hash})> _uploadArtifactBytes({
+    required List<int> bytes,
+    String? hash,
+    String? appId,
+    String? progressLabel,
+    ArtifactUploadProgressCallback? onUploadProgress,
+  }) async {
+    final computed = hash ?? sha256.convert(bytes).toString();
+    if (bytes.length <= chunkedUploadThresholdBytes) {
+      final upload = await _postJson(
+        Uri.parse('$_admin/artifacts'),
+        {
+          'content_base64': base64Encode(bytes),
+          if (appId != null && appId.isNotEmpty) 'app_id': appId,
+        },
+        progressLabel: progressLabel,
+        onUploadProgress: onUploadProgress,
+      );
+      if (!upload.isSuccess) _throw(upload);
+      final uploaded = await _json(upload);
+      return (
+        path: uploaded['path'] as String? ?? '',
+        hash: uploaded['hash'] as String? ?? computed,
+      );
+    }
+
+    final init = await _httpClient.post(
+      Uri.parse('$_admin/uploads'),
+      headers: {'content-type': 'application/json'},
+      body: json.encode({
+        'size_bytes': bytes.length,
+        'chunk_size': uploadChunkBytes,
+        'hash': computed,
+        if (appId != null && appId.isNotEmpty) 'app_id': appId,
+      }),
+    );
+    if (!init.isSuccess) _throw(init);
+    final session = await _json(init);
+    final uploadId = session['upload_id'] as String;
+    final chunkSize = (session['chunk_size'] as num).toInt();
+    final totalChunks = (session['total_chunks'] as num).toInt();
+    final label = progressLabel ?? 'upload';
+
+    onUploadProgress?.call(
+      ArtifactUploadProgress(
+        label: label,
+        sentBytes: 0,
+        totalBytes: bytes.length,
+        chunkIndex: 0,
+        totalChunks: totalChunks,
+        chunkSentBytes: 0,
+        chunkTotalBytes: totalChunks == 1
+            ? bytes.length
+            : (chunkSize > bytes.length ? bytes.length : chunkSize),
+      ),
+    );
+
+    for (var i = 0; i < totalChunks; i++) {
+      final start = i * chunkSize;
+      final end =
+          start + chunkSize > bytes.length ? bytes.length : start + chunkSize;
+      final part = bytes.sublist(start, end);
+      http.Response? put;
+      Object? lastError;
+      for (var attempt = 0; attempt < 3; attempt++) {
+        try {
+          final response = await _putChunkWithProgress(
+            uri: Uri.parse('$_admin/uploads/$uploadId/chunks/$i'),
+            part: part,
+            chunkIndex: i,
+            totalChunks: totalChunks,
+            fileOffsetStart: start,
+            fileTotalBytes: bytes.length,
+            label: label,
+            onUploadProgress: onUploadProgress,
+          );
+          put = response;
+          if (response.isSuccess) break;
+          lastError = _parseErrorResponse(response.statusCode, response.body);
+        } on Exception catch (e) {
+          lastError = e;
+          put = null;
+        }
+        if (attempt < 2) {
+          await Future<void>.delayed(_uploadRetryBaseDelay * (attempt + 1));
+        }
+      }
+      if (put == null || !put.isSuccess) {
+        try {
+          await _httpClient.delete(Uri.parse('$_admin/uploads/$uploadId'));
+        } on Exception {
+          // Best-effort abort.
+        }
+        if (lastError is CodePushException) throw lastError;
+        if (put != null) _throw(put);
+        throw CodePushException(
+          message: 'Chunk $i upload failed: $lastError',
+        );
+      }
+    }
+
+    final done = await _httpClient.post(
+      Uri.parse('$_admin/uploads/$uploadId/complete'),
+      headers: {'content-type': 'application/json'},
+      body: '{}',
+    );
+    if (!done.isSuccess) _throw(done);
+    final artifact = await _json(done);
+    return (
+      path: artifact['path'] as String? ?? '',
+      hash: artifact['hash'] as String? ?? computed,
+    );
+  }
+
+
+  /// Streams one chunk body while emitting per-chunk and whole-file progress.
+  Future<http.Response> _putChunkWithProgress({
+    required Uri uri,
+    required List<int> part,
+    required int chunkIndex,
+    required int totalChunks,
+    required int fileOffsetStart,
+    required int fileTotalBytes,
+    required String label,
+    ArtifactUploadProgressCallback? onUploadProgress,
+  }) async {
+    const streamChunk = 64 * 1024;
+    final request = http.StreamedRequest('PUT', uri)
+      ..headers['content-type'] = 'application/octet-stream'
+      ..contentLength = part.length;
+    final responseFuture = _httpClient.send(request);
+
+    void report(int chunkSent) {
+      onUploadProgress?.call(
+        ArtifactUploadProgress(
+          label: label,
+          sentBytes: fileOffsetStart + chunkSent,
+          totalBytes: fileTotalBytes,
+          chunkIndex: chunkIndex,
+          totalChunks: totalChunks,
+          chunkSentBytes: chunkSent,
+          chunkTotalBytes: part.length,
+        ),
+      );
+    }
+
+    report(0);
+    for (var offset = 0; offset < part.length; offset += streamChunk) {
+      final end = offset + streamChunk > part.length
+          ? part.length
+          : offset + streamChunk;
+      request.sink.add(part.sublist(offset, end));
+      report(end);
+    }
+    await request.sink.close();
+    final streamed = await responseFuture;
+    return http.Response.fromStream(streamed);
   }
 
   /// POSTs JSON, optionally streaming the body so [onUploadProgress] can report

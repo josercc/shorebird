@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:mason_logger/mason_logger.dart';
@@ -351,9 +352,10 @@ void main() {
         logger = MockShorebirdLogger();
         progress = MockProgress();
 
+        // Keep syslog "running" so the reconnect loop does not spin in tests.
         when(
           () => idevicesyslog.startLogger(device: any(named: 'device')),
-        ).thenAnswer((_) async => ExitCode.success.code);
+        ).thenAnswer((_) => Completer<int>().future);
         when(() => logger.progress(any())).thenReturn(progress);
         when(() => process.run(any(), any(that: contains('list')))).thenAnswer((
           invocation,
@@ -378,19 +380,6 @@ void main() {
             File(jsonFilePath)
               ..createSync()
               ..writeAsStringSync(installJsonOutput);
-          }
-          return processResult;
-        });
-        when(
-          () => process.run(any(), any(that: contains('launch'))),
-        ).thenAnswer((invocation) async {
-          final processRunArgs =
-              invocation.positionalArguments.last as List<String>;
-          final jsonFilePath = processRunArgs.last;
-          if (jsonFilePath.endsWith('.json')) {
-            File(jsonFilePath)
-              ..createSync()
-              ..writeAsStringSync(launchJsonOutput);
           }
           return processResult;
         });
@@ -457,6 +446,29 @@ void main() {
         });
 
         test('returns exit code 70 ', () async {
+          final launchProcess = MockProcess();
+          when(() => launchProcess.stdout).thenAnswer(
+            (_) => const Stream<List<int>>.empty(),
+          );
+          when(() => launchProcess.stderr).thenAnswer(
+            (_) => const Stream<List<int>>.empty(),
+          );
+          when(() => launchProcess.exitCode).thenAnswer(
+            (_) async => ExitCode.software.code,
+          );
+          when(
+            () => process.start(any(), any(that: contains('--console'))),
+          ).thenAnswer((invocation) async {
+            final processStartArgs =
+                invocation.positionalArguments.last as List<String>;
+            final jsonFlagIndex = processStartArgs.indexOf('--json-output');
+            final jsonFilePath = processStartArgs[jsonFlagIndex + 1];
+            File(jsonFilePath)
+              ..createSync(recursive: true)
+              ..writeAsStringSync(launchJsonOutput);
+            return launchProcess;
+          });
+
           expect(
             await runWithOverrides(
               () => devicectl.installAndLaunchApp(
@@ -471,7 +483,7 @@ void main() {
             () => progress.fail(
               any(
                 that: contains(
-                  '''Unable to launch dev.shorebird.ios-test because the device was not, or could not be, unlocked.''',
+                  'Unable to launch dev.shorebird.ios-test because the device was not, or could not be, unlocked.',
                 ),
               ),
             ),
@@ -492,7 +504,30 @@ void main() {
           ).readAsStringSync();
         });
 
-        test('returns exit code 0', () async {
+        test('launches with --console and returns process exit code', () async {
+          final launchProcess = MockProcess();
+          when(() => launchProcess.stdout).thenAnswer(
+            (_) => const Stream<List<int>>.empty(),
+          );
+          when(() => launchProcess.stderr).thenAnswer(
+            (_) => const Stream<List<int>>.empty(),
+          );
+          when(() => launchProcess.exitCode).thenAnswer((_) async => 0);
+          when(
+            () => process.start(any(), any(that: contains('--console'))),
+          ).thenAnswer((invocation) async {
+            final processStartArgs =
+                invocation.positionalArguments.last as List<String>;
+            expect(processStartArgs, contains('--console'));
+            expect(processStartArgs, contains('--terminate-existing'));
+            final jsonFlagIndex = processStartArgs.indexOf('--json-output');
+            final jsonFilePath = processStartArgs[jsonFlagIndex + 1];
+            File(jsonFilePath)
+              ..createSync(recursive: true)
+              ..writeAsStringSync(launchJsonOutput);
+            return launchProcess;
+          });
+
           expect(
             await runWithOverrides(
               () => devicectl.installAndLaunchApp(
@@ -502,6 +537,11 @@ void main() {
             ),
             equals(ExitCode.success.code),
           );
+
+          verify(() => progress.complete()).called(2);
+          verify(
+            () => process.start(any(), any(that: contains('--console'))),
+          ).called(1);
         });
       });
     });

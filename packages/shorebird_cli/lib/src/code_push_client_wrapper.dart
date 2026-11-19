@@ -1872,10 +1872,10 @@ Release artifacts were cloned; re-run baselines manually:
           podfileLockHash: artifact.podfileLockHash,
           packageName: resolvedPackage,
           onUploadProgress: (event) {
-            progressUpdater.report(
-              label: 'Uploading ${event.label} ($index/$total)',
-              receivedBytes: event.sentBytes,
-              totalBytes: event.totalBytes,
+            _reportUploadProgress(
+              progressUpdater,
+              event,
+              labelSuffix: '($index/$total)',
             );
           },
         );
@@ -2172,12 +2172,36 @@ Release artifacts were cloned; re-run baselines manually:
   /// Forwards upload byte events to [progress].
   ArtifactUploadProgressCallback _uploadReporter(Progress progress) {
     final updater = ByteProgressUpdater(onUpdate: progress.update);
-    return (event) {
+    return (event) => _reportUploadProgress(updater, event);
+  }
+
+  void _reportUploadProgress(
+    ByteProgressUpdater updater,
+    ArtifactUploadProgress event, {
+    String? labelSuffix,
+  }) {
+    final base = 'Uploading ${event.label}'
+        '${labelSuffix == null ? '' : ' $labelSuffix'}';
+    if (event.isChunked &&
+        event.chunkSentBytes != null &&
+        event.chunkTotalBytes != null) {
+      final chunkNo = event.chunkIndex! + 1;
       updater.report(
-        label: 'Uploading ${event.label}',
-        receivedBytes: event.sentBytes,
-        totalBytes: event.totalBytes,
+        label: base,
+        receivedBytes: event.chunkSentBytes!,
+        totalBytes: event.chunkTotalBytes,
+        progressKey: event.chunkIndex,
+        message:
+            '$base (chunk $chunkNo/${event.totalChunks}) '
+            '${formatByteProgress(event.chunkSentBytes!, event.chunkTotalBytes)} · '
+            'total ${formatByteProgress(event.sentBytes, event.totalBytes)}',
       );
-    };
+      return;
+    }
+    updater.report(
+      label: base,
+      receivedBytes: event.sentBytes,
+      totalBytes: event.totalBytes,
+    );
   }
 }

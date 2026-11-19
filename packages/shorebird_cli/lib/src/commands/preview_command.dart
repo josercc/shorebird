@@ -13,7 +13,9 @@ import 'package:path/path.dart' as p;
 import 'package:shorebird_cli/src/artifact_manager.dart';
 import 'package:shorebird_cli/src/cache.dart';
 import 'package:shorebird_cli/src/code_push_client_wrapper.dart';
+import 'package:shorebird_cli/src/commands/preview/module_preview.dart';
 import 'package:shorebird_cli/src/common_arguments.dart';
+import 'package:shorebird_cli/src/config/config.dart';
 import 'package:shorebird_cli/src/deployment_track.dart';
 import 'package:shorebird_cli/src/executables/devicectl/apple_device.dart';
 import 'package:shorebird_cli/src/executables/executables.dart';
@@ -166,33 +168,26 @@ This is only applicable when previewing Android releases.''',
       return ExitCode.success.code;
     }
 
-    // The information if a platform is previewable or not is on
-    // the artifacts, we would need to query for the artifacts for all platforms
-    // in a release to be able to know if a platform is previewable or not.
-    //
-    // To avoid making too many requests, we instead ask for all releases two
-    // times.
-    //
-    // When querying for releases, we can ask for sideloadable only
-    //
-    // When sideloadableOnly is true, the API will only return releases that
-    // have at least one platform that is previewable, and will not return
-    // platforms that are not previewable.
-    //
-    // But when sideloadableOnly is false, the API will return all releases
-    // with all platforms, including those that are not previewable.
-    //
-    // With these two lists, we can now determine if a platform is previewable
-    // or not, by making a difference between the two lists.
+    // Flutter modules upload aar / xcframework artifacts with canSideload
+    // false, so they never appear in sideloadable releases. Use all releases
+    // for module preview; keep the sideloadable filter for standalone apps.
+    final isModule = shorebirdEnv.isFlutterModule;
     final (allReleases, sideloadableReleases) = await (
       codePushClientWrapper.getReleases(appId: appId),
-      codePushClientWrapper.getReleases(appId: appId, sideloadableOnly: true),
+      isModule
+          ? Future<List<Release>>.value(const <Release>[])
+          : codePushClientWrapper.getReleases(
+              appId: appId,
+              sideloadableOnly: true,
+            ),
     ).wait;
 
     final maybePlatform = results['platform'] != null
         ? ReleasePlatform.values.byName(results['platform'] as String)
         : null;
-    final platformReleases = sideloadableReleases
+
+    final candidateReleases = isModule ? allReleases : sideloadableReleases;
+    final platformReleases = candidateReleases
         .where(
           (r) =>
               maybePlatform == null ||
@@ -203,10 +198,16 @@ This is only applicable when previewing Android releases.''',
     if (platformReleases.isEmpty) {
       if (maybePlatform != null) {
         logger.err(
-          '''No previewable ${maybePlatform.displayName} releases found''',
+          isModule
+              ? '''No ${maybePlatform.displayName} releases found for this module'''
+              : '''No previewable ${maybePlatform.displayName} releases found''',
         );
       } else {
-        logger.err('No previewable releases found for this app');
+        logger.err(
+          isModule
+              ? 'No releases found for this module'
+              : 'No previewable releases found for this app',
+        );
       }
       return ExitCode.usage.code;
     }
@@ -220,7 +221,11 @@ This is only applicable when previewing Android releases.''',
     );
 
     if (release == null) {
-      logger.err('No previewable releases found for version $releaseVersion');
+      logger.err(
+        isModule
+            ? 'No releases found for version $releaseVersion'
+            : 'No previewable releases found for version $releaseVersion',
+      );
       return ExitCode.usage.code;
     }
 
@@ -238,14 +243,16 @@ This is only applicable when previewing Android releases.''',
       return ExitCode.usage.code;
     }
 
-    final releaseWithAllPlatforms = allReleases.firstWhere(
-      (r) => r.id == release.id,
-    );
-    assertPreviewableReleases(
-      releaseWithAllPlatforms: releaseWithAllPlatforms,
-      release: release,
-      targetPlatform: maybePlatform,
-    );
+    if (!isModule) {
+      final releaseWithAllPlatforms = allReleases.firstWhere(
+        (r) => r.id == release.id,
+      );
+      assertPreviewableReleases(
+        releaseWithAllPlatforms: releaseWithAllPlatforms,
+        release: release,
+        targetPlatform: maybePlatform,
+      );
+    }
 
     final ReleasePlatform releasePlatform;
     if (maybePlatform != null) {
@@ -260,7 +267,40 @@ This is only applicable when previewing Android releases.''',
       releasePlatform = await promptForPlatform(availablePlatforms);
     }
 
-    final deviceId = results['device-id'] as String?;
+    var deviceId = results['device-id'] as String?;
+    if (releasePlatform == ReleasePlatform.android) {
+      deviceId = await promptForAndroidDeviceId(deviceId: deviceId);
+      if (deviceId == null) {
+        return ExitCode.software.code;
+      }
+    } else if (releasePlatform == ReleasePlatform.ios) {
+      deviceId = await promptForIosDeviceId(deviceId: deviceId);
+    }
+
+    if (isModule) {
+      return switch (releasePlatform) {
+        ReleasePlatform.android => installAndLaunchAndroidModule(
+          appId: appId,
+          release: release,
+          deviceId: deviceId,
+          track: track,
+          shorebirdYaml: shorebirdYaml,
+        ),
+        ReleasePlatform.ios => installAndLaunchIosModule(
+          appId: appId,
+          release: release,
+          deviceId: deviceId,
+          track: track,
+          shorebirdYaml: shorebirdYaml,
+        ),
+        _ => () {
+          logger.err(
+            '''Module preview only supports Android (aar) and iOS (ios-framework).''',
+          );
+          return ExitCode.usage.code;
+        }(),
+      };
+    }
 
     return switch (releasePlatform) {
       ReleasePlatform.android => installAndLaunchAndroid(
@@ -330,6 +370,490 @@ This is only applicable when previewing Android releases.''',
           'without prompting.',
     );
     return ReleasePlatform.values.firstWhere((p) => p.displayName == platform);
+  }
+
+  /// Resolves an Android device id, prompting when multiple devices are
+  /// connected and `--device-id` was not provided.
+  ///
+  /// Returns `null` when no usable device is available.
+  Future<String?> promptForAndroidDeviceId({String? deviceId}) async {
+    late final List<AndroidDevice> devices;
+    try {
+      devices = await adb.listDevices();
+    } on Exception catch (error) {
+      logger.err('$error');
+      return null;
+    }
+
+    if (deviceId != null) {
+      final matched = devices.firstWhereOrNull((d) => d.id == deviceId);
+      if (matched == null && devices.isNotEmpty) {
+        logger.warn(
+          'Device "$deviceId" was not found in the connected device list. '
+          'Continuing with the provided id.',
+        );
+      }
+      return deviceId;
+    }
+
+    if (devices.isEmpty) {
+      logger.err(
+        'No Android devices found. Connect a device or start an emulator.',
+      );
+      return null;
+    }
+
+    if (devices.length == 1) {
+      final device = devices.single;
+      logger.info('Using device ${device.displayName}');
+      return device.id;
+    }
+
+    final chosen = logger.chooseOne<AndroidDevice>(
+      'Which device would you like to preview on?',
+      choices: devices,
+      display: (device) => device.displayName,
+      hint: 'Pass --device-id=<id> to preview on a specific device '
+          'without prompting.',
+    );
+    return chosen.id;
+  }
+
+  /// Resolves an iOS device id from currently available CoreDevices.
+  ///
+  /// When no iOS 17+ devices are visible to `devicectl` and `--device-id` was
+  /// not provided, returns `null` so callers can fall back to `ios-deploy`.
+  Future<String?> promptForIosDeviceId({String? deviceId}) async {
+    late final List<AppleDevice> devices;
+    try {
+      devices = await devicectl.listAvailableIosDevices();
+    } on Exception catch (error, stackTrace) {
+      logger.detail('Failed to list iOS devices: $error $stackTrace');
+      return deviceId;
+    }
+
+    if (deviceId != null) {
+      final matched = devices.firstWhereOrNull((d) => d.udid == deviceId);
+      if (matched == null && devices.isNotEmpty) {
+        logger.warn(
+          'Device "$deviceId" was not found in the connected device list. '
+          'Continuing with the provided id.',
+        );
+      }
+      return deviceId;
+    }
+
+    if (devices.isEmpty) {
+      return null;
+    }
+
+    if (devices.length == 1) {
+      final device = devices.single;
+      logger.info('Using device ${device.name} (${device.udid})');
+      return device.udid;
+    }
+
+    final chosen = logger.chooseOne<AppleDevice>(
+      'Which device would you like to preview on?',
+      choices: devices,
+      display: (device) => '${device.name} (${device.udid})',
+      hint: 'Pass --device-id=<udid> to preview on a specific device '
+          'without prompting.',
+    );
+    return chosen.udid;
+  }
+
+  /// Downloads an `aar`, replaces it in the host Android project configured
+  /// under `shorebird.yaml` → `preview.android` (or top-level `android`),
+  /// builds the host, and installs it on a device.
+  Future<int> installAndLaunchAndroidModule({
+    required String appId,
+    required Release release,
+    required DeploymentTrack track,
+    required ShorebirdYaml? shorebirdYaml,
+    String? deviceId,
+  }) async {
+    final configRoot =
+        shorebirdEnv.getShorebirdProjectRoot() ?? Directory.current;
+    final previewConfig = requireAndroidPreviewConfig(
+      yaml: shorebirdYaml,
+      logger: logger,
+      configRoot: configRoot,
+    );
+    if (previewConfig == null) {
+      return ExitCode.usage.code;
+    }
+
+    final packageName = shorebirdEnv.androidPackageName;
+    if (packageName == null) {
+      logger.err('Could not find androidPackage in pubspec.yaml.');
+      return ExitCode.config.code;
+    }
+    final hostProject = Directory(
+      resolvePreviewPath(
+        path: previewConfig.hostProject,
+        configRoot: configRoot,
+      ),
+    );
+    final artifactDir = Directory(
+      resolvePreviewPath(
+        path: previewConfig.artifactDir,
+        configRoot: configRoot,
+      ),
+    );
+
+    if (!hostProject.existsSync()) {
+      logger.err('Host project not found: ${hostProject.path}');
+      return ExitCode.config.code;
+    }
+
+    late final ReleaseArtifact releaseAarArtifact;
+    try {
+      releaseAarArtifact = await codePushClientWrapper.getReleaseArtifact(
+        appId: appId,
+        releaseId: release.id,
+        arch: 'aar',
+        platform: ReleasePlatform.android,
+      );
+    } on Exception catch (e, s) {
+      logger
+        ..err('Error getting release artifact: $e')
+        ..detail('Stack trace: $s');
+      return ExitCode.software.code;
+    }
+
+    late final File cachedAar;
+    try {
+      cachedAar = File(
+        getArtifactPath(
+          appId: appId,
+          release: release,
+          artifact: releaseAarArtifact,
+          platform: ReleasePlatform.android,
+          fileExtension: 'aar',
+        ),
+      );
+      if (!cachedAar.existsSync()) {
+        cachedAar.createSync(recursive: true);
+        await artifactManager.downloadWithProgressUpdates(
+          Uri.parse(releaseAarArtifact.url),
+          message: 'Downloading aar',
+          outputPath: cachedAar.path,
+        );
+      }
+    } on Exception catch (error) {
+      logger.err('$error');
+      return ExitCode.software.code;
+    }
+
+    final channelProgress = logger.progress('Using $track track');
+    try {
+      await setChannelOnAar(aarFile: cachedAar, channel: track.channel);
+      channelProgress.complete();
+    } on Exception catch (error) {
+      channelProgress.fail('$error');
+      return ExitCode.software.code;
+    }
+
+    final targetAarPath = moduleAarArtifactPath(
+      artifactDir: artifactDir.path,
+      packageName: packageName,
+      buildNumber: previewConfig.buildNumber,
+    );
+    final replaceProgress = logger.progress('Replacing host aar');
+    try {
+      final targetAar = File(targetAarPath)..createSync(recursive: true);
+      cachedAar.copySync(targetAar.path);
+      final pomFile = File(
+        p.join(
+          p.dirname(targetAarPath),
+          'flutter_release-${previewConfig.buildNumber}.pom',
+        ),
+      );
+      if (!pomFile.existsSync()) {
+        pomFile.writeAsStringSync(
+          moduleAarPomContents(
+            packageName: packageName,
+            buildNumber: previewConfig.buildNumber,
+          ),
+        );
+      }
+      replaceProgress.complete('Replaced ${cyan.wrap(targetAar.path)}');
+    } on Exception catch (error) {
+      replaceProgress.fail('$error');
+      return ExitCode.software.code;
+    }
+
+    final buildProgress = logger.progress(
+      'Building host (${previewConfig.assembleTask})',
+    );
+    try {
+      final gradlewName = platform.isWindows ? 'gradlew.bat' : 'gradlew';
+      final gradlewFile = File(p.join(hostProject.path, gradlewName));
+      if (!gradlewFile.existsSync()) {
+        throw Exception('Could not find $gradlewName in ${hostProject.path}');
+      }
+      if (!platform.isWindows) {
+        await process.run('chmod', ['+x', gradlewFile.path]);
+      }
+      final exitCode = await process.stream(
+        gradlewFile.path,
+        [previewConfig.assembleTask],
+        runInShell: false,
+        workingDirectory: hostProject.path,
+      );
+      if (exitCode != ExitCode.success.code) {
+        throw Exception(
+          'gradlew ${previewConfig.assembleTask} failed ($exitCode)',
+        );
+      }
+      buildProgress.complete();
+    } on Exception catch (error) {
+      buildProgress.fail('$error');
+      return ExitCode.software.code;
+    }
+
+    final apk = findNewestHostApk(hostProject);
+    if (apk == null) {
+      logger.err(
+        'Could not find a host APK under ${hostProject.path} after build.',
+      );
+      return ExitCode.software.code;
+    }
+
+    logger.info(
+      'This will reinstall the host app and clear its data on the device.',
+    );
+    final installProgress = logger.progress('Installing host apk');
+    try {
+      await adb.installApk(apkPath: apk.path, deviceId: deviceId);
+      await adb.clearAppData(
+        package: previewConfig.applicationId,
+        deviceId: deviceId,
+      );
+      await adb.startApp(
+        package: previewConfig.applicationId,
+        deviceId: deviceId,
+      );
+      installProgress.complete();
+    } on Exception catch (error) {
+      installProgress.fail('$error');
+      return ExitCode.software.code;
+    }
+
+    final logProcess = await adb.logcat(filter: 'flutter', deviceId: deviceId);
+    const decoder = Utf8Decoder(allowMalformed: true);
+    logProcess.stdout.listen((event) {
+      logger.info(decoder.convert(event));
+    });
+    logProcess.stderr.listen((event) {
+      logger.err(decoder.convert(event));
+    });
+    return logProcess.exitCode;
+  }
+
+  /// Downloads an `xcframework`, replaces `App.xcframework` in the host iOS
+  /// project configured under `shorebird.yaml` → `preview.ios` (or top-level
+  /// `ios`), builds the host, and installs it on a device.
+  Future<int> installAndLaunchIosModule({
+    required String appId,
+    required Release release,
+    required DeploymentTrack track,
+    required ShorebirdYaml? shorebirdYaml,
+    String? deviceId,
+  }) async {
+    final configRoot =
+        shorebirdEnv.getShorebirdProjectRoot() ?? Directory.current;
+    final previewConfig = requireIosPreviewConfig(
+      yaml: shorebirdYaml,
+      logger: logger,
+      configRoot: configRoot,
+    );
+    if (previewConfig == null) {
+      return ExitCode.usage.code;
+    }
+    final hostProject = Directory(
+      resolvePreviewPath(
+        path: previewConfig.hostProject,
+        configRoot: configRoot,
+      ),
+    );
+    final frameworksDir = Directory(
+      resolvePreviewPath(
+        path: previewConfig.frameworksDir,
+        configRoot: configRoot,
+      ),
+    );
+
+    if (!hostProject.existsSync()) {
+      logger.err('Host project not found: ${hostProject.path}');
+      return ExitCode.config.code;
+    }
+    if (!frameworksDir.existsSync()) {
+      frameworksDir.createSync(recursive: true);
+    }
+
+    late final ReleaseArtifact releaseXcframeworkArtifact;
+    try {
+      releaseXcframeworkArtifact = await codePushClientWrapper
+          .getReleaseArtifact(
+            appId: appId,
+            releaseId: release.id,
+            arch: 'xcframework',
+            platform: ReleasePlatform.ios,
+          );
+    } on Exception catch (e, s) {
+      logger
+        ..err('Error getting release artifact: $e')
+        ..detail('Stack trace: $s');
+      return ExitCode.software.code;
+    }
+
+    late final File archiveFile;
+    try {
+      final cachedZip = File(
+        getArtifactPath(
+          appId: appId,
+          release: release,
+          artifact: releaseXcframeworkArtifact,
+          platform: ReleasePlatform.ios,
+          fileExtension: 'zip',
+        ),
+      );
+      if (!cachedZip.existsSync()) {
+        cachedZip.createSync(recursive: true);
+        await artifactManager.downloadWithProgressUpdates(
+          Uri.parse(releaseXcframeworkArtifact.url),
+          message: 'Downloading xcframework',
+          outputPath: cachedZip.path,
+        );
+      }
+      archiveFile = cachedZip;
+    } on Exception catch (error) {
+      logger.err('$error');
+      return ExitCode.software.code;
+    }
+
+    final appXcframework = Directory(
+      p.join(frameworksDir.path, 'App.xcframework'),
+    );
+    final replaceProgress = logger.progress('Replacing App.xcframework');
+    try {
+      if (appXcframework.existsSync()) {
+        appXcframework.deleteSync(recursive: true);
+      }
+      appXcframework.createSync(recursive: true);
+      await artifactManager.extractZip(
+        zipFile: archiveFile,
+        outputDirectory: appXcframework,
+      );
+      replaceProgress.complete();
+    } on Exception catch (error) {
+      replaceProgress.fail('$error');
+      return ExitCode.software.code;
+    }
+
+    final channelProgress = logger.progress('Using $track track');
+    try {
+      await setChannelOnXcframework(
+        xcframeworkDirectory: appXcframework,
+        channel: track.channel,
+      );
+      channelProgress.complete();
+    } on Exception catch (error) {
+      channelProgress.fail('$error');
+      return ExitCode.software.code;
+    }
+
+    final deviceLocateProgress = logger.progress('Locating device for run');
+    AppleDevice? deviceForLaunch;
+    try {
+      if (deviceId != null) {
+        final devices = await devicectl.listAvailableIosDevices();
+        deviceForLaunch = devices.firstWhereOrNull((d) => d.udid == deviceId);
+      } else {
+        deviceForLaunch = await devicectl.deviceForLaunch();
+      }
+    } on Exception catch (error, stackTrace) {
+      logger.detail('devicectl device lookup failed: $error $stackTrace');
+    }
+
+    final destinationId = deviceForLaunch?.udid ?? deviceId;
+    if (destinationId == null) {
+      deviceLocateProgress.fail('No iOS device found for preview.');
+      return ExitCode.software.code;
+    }
+    deviceLocateProgress.complete(
+      deviceForLaunch != null
+          ? 'Using device ${deviceForLaunch.name}'
+          : 'Using device $destinationId',
+    );
+
+    final derivedData = Directory.systemTemp.createTempSync(
+      'shorebird_module_preview_',
+    );
+    final buildProgress = logger.progress(
+      'Building host (${previewConfig.scheme}/${previewConfig.configuration})',
+    );
+    try {
+      final targetArgs = resolveXcodeBuildTargetArgs(
+        hostProject: hostProject,
+        config: previewConfig,
+      );
+      final exitCode = await process.stream(
+        XcodeBuild.executable,
+        [
+          ...targetArgs,
+          '-scheme',
+          previewConfig.scheme,
+          '-configuration',
+          previewConfig.configuration,
+          '-destination',
+          'id=$destinationId',
+          '-derivedDataPath',
+          derivedData.path,
+          'build',
+        ],
+        runInShell: false,
+        workingDirectory: hostProject.path,
+      );
+      if (exitCode != ExitCode.success.code) {
+        throw Exception('xcodebuild failed ($exitCode)');
+      }
+      buildProgress.complete();
+    } on Exception catch (error) {
+      buildProgress.fail('$error');
+      return ExitCode.software.code;
+    }
+
+    final builtApp = findBuiltIosApp(
+      derivedData: derivedData,
+      configuration: previewConfig.configuration,
+    );
+    if (builtApp == null) {
+      logger.err('Could not find a built .app under ${derivedData.path}');
+      return ExitCode.software.code;
+    }
+
+    logger.info(
+      'This will reinstall the host app and clear its data on the device.',
+    );
+    try {
+      if (deviceForLaunch != null) {
+        return await devicectl.installAndLaunchApp(
+          runnerAppDirectory: builtApp,
+          device: deviceForLaunch,
+        );
+      }
+      await iosDeploy.installIfNeeded();
+      return await iosDeploy.installAndLaunchApp(
+        bundlePath: builtApp.path,
+        deviceId: destinationId,
+      );
+    } on Exception catch (error, stackTrace) {
+      logger.detail('Error launching host app. $error $stackTrace');
+      return ExitCode.software.code;
+    }
   }
 
   /// Downloads and runs the given [release] the given [appId] on Linux.
@@ -748,8 +1272,9 @@ This is only applicable when previewing Android releases.''',
     required DeploymentTrack track,
     String? deviceId,
   }) async {
-    await iosDeploy.installIfNeeded();
-
+    // ios-deploy is only needed for the iOS 16- fallback path. Installing it
+    // eagerly requires a local Flutter SDK (`flutter precache --ios`) and
+    // breaks iOS 17+ previews that use devicectl when that SDK is missing.
     const platform = ReleasePlatform.ios;
     late Directory runnerDirectory;
     late ReleaseArtifact releaseRunnerArtifact;
@@ -875,6 +1400,7 @@ Skipping the ios-deploy fallback because it does not support iOS 17 or later.'''
         );
       } else {
         logger.detail('Using ios-deploy to install and launch.');
+        await iosDeploy.installIfNeeded();
         installExitCode = await iosDeploy.installAndLaunchApp(
           bundlePath: runnerDirectory.path,
           deviceId: deviceId,
@@ -999,6 +1525,83 @@ Skipping the ios-deploy fallback because it does not support iOS 17 or later.'''
       channel: channel,
       shorebirdYamlFile: shorebirdYamlFile,
     );
+  }
+
+  /// Unzips a Flutter module `.aar`, sets `channel` in
+  /// `assets/flutter_assets/shorebird.yaml`, and re-zips the archive.
+  Future<void> setChannelOnAar({
+    required File aarFile,
+    required String channel,
+  }) async {
+    final extractZip = artifactManager.extractZip;
+
+    await Isolate.run(() async {
+      final tempDir = Directory.systemTemp.createTempSync();
+      final outputPath = p.join(tempDir.path, 'tmp.aar.contents');
+
+      await extractZip(
+        zipFile: aarFile,
+        outputDirectory: Directory(outputPath),
+      );
+
+      final shorebirdYamlFile = File(
+        p.join(outputPath, 'assets', 'flutter_assets', 'shorebird.yaml'),
+      );
+
+      final didUpdate = await _maybeSetChannelInShorebirdYaml(
+        channel: channel,
+        shorebirdYamlFile: shorebirdYamlFile,
+      );
+      if (!didUpdate) {
+        tempDir.deleteSync(recursive: true);
+        return;
+      }
+
+      final tmpAarFile = File(p.join(tempDir.path, p.basename(aarFile.path)));
+      final encoder = ZipFileEncoder()..create(tmpAarFile.path);
+      for (final file in Directory(outputPath).listSync(recursive: true)) {
+        if (file is File) {
+          await encoder.addFile(
+            file,
+            file.path.replaceFirst('$outputPath${p.separator}', ''),
+          );
+        }
+      }
+      await encoder.close();
+
+      tmpAarFile.copySync(aarFile.path);
+      tempDir.deleteSync(recursive: true);
+    });
+  }
+
+  /// Sets `channel` on every `flutter_assets/shorebird.yaml` found under an
+  /// `App.xcframework` directory.
+  Future<void> setChannelOnXcframework({
+    required Directory xcframeworkDirectory,
+    required String channel,
+  }) async {
+    final yamlFiles = xcframeworkDirectory
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where(
+          (f) =>
+              p.basename(f.path) == 'shorebird.yaml' &&
+              p.basename(p.dirname(f.path)) == 'flutter_assets',
+        )
+        .toList();
+
+    if (yamlFiles.isEmpty) {
+      throw Exception(
+        'Unable to find shorebird.yaml under ${xcframeworkDirectory.path}',
+      );
+    }
+
+    for (final yamlFile in yamlFiles) {
+      await _maybeSetChannelInShorebirdYaml(
+        channel: channel,
+        shorebirdYamlFile: yamlFile,
+      );
+    }
   }
 
   /// Unzips the `.aab` and sets the channel property in the shorebird.yaml

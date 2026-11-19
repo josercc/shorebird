@@ -5,6 +5,7 @@ import 'package:mason_logger/mason_logger.dart';
 import 'package:meta/meta.dart';
 import 'package:scoped_deps/scoped_deps.dart';
 import 'package:shorebird_cli/src/engine_config.dart';
+import 'package:shorebird_cli/src/flutterpatch_mirrors.dart';
 import 'package:shorebird_cli/src/logging/logging.dart';
 import 'package:shorebird_cli/src/platform.dart';
 import 'package:shorebird_cli/src/shorebird_env.dart';
@@ -264,9 +265,8 @@ $stderr''');
 
   Map<String, String> _environmentOverrides({required String executable}) {
     if (executable == 'flutter') {
-      // If this ever changes we also need to update the `shorebird` shell
-      // wrapper which downloads runs Flutter to fetch artifacts the first time.
-      return {'FLUTTER_STORAGE_BASE_URL': 'https://download.shorebird.dev'};
+      // Keep in sync with bin/shorebird.ps1 and install_cli.* engine CDN.
+      return FlutterpatchMirrors.flutterStorageEnvironment;
     }
 
     return {};

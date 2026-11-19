@@ -37,9 +37,13 @@ class IDeviceSysLog {
 
   /// The libraries that idevicesyslog depends on.
   @visibleForTesting
+  // Directory names under flutter/bin/cache/artifacts. These must match the
+  // on-disk artifact folders shipped by `flutter precache --ios` (note:
+  // libusbmuxd / libimobiledeviceglue — not "usbmuxd").
   static const deps = [
     'libimobiledevice',
-    'usbmuxd',
+    'libusbmuxd',
+    'libimobiledeviceglue',
     'libplist',
     'openssl',
     'ios-deploy',
@@ -64,7 +68,7 @@ class IDeviceSysLog {
   /// that are produced by the app. These log lines are of the form:
   // ignore: unintended_html_in_doc_comment
   ///   Nov 10 14:46:57 Runner(Flutter)[1044] <Notice>: flutter: hello
-  static RegExp appLogLineRegex = RegExp(r'\(Flutter\)\[\d+\] <Notice>: (.*)$');
+  static RegExp appLogLineRegex = RegExp(r'\(Flutter\)\[\d+\] <\w+>: (.*)$');
 
   /// Starts an instance of idevicesyslog for the given device ID. Returns the
   /// exit code of the process.
@@ -75,6 +79,12 @@ class IDeviceSysLog {
     logger.detail(
       'launching idevicesyslog with DYLD_LIBRARY_PATH=$_dyldPathEntry',
     );
+    if (!idevicesyslogExecutable.existsSync()) {
+      logger.warn(
+        'idevicesyslog not found at ${idevicesyslogExecutable.path}. '
+        'Flutter runtime logs will not be available.',
+      );
+    }
 
     final loggerProcess = await process.start(
       idevicesyslogExecutable.path,
@@ -90,21 +100,40 @@ class IDeviceSysLog {
 
     // Use allowMalformed to handle non-UTF8 bytes in device syslog output.
     const decoder = Utf8Decoder(allowMalformed: true);
-    loggerProcess.stdout
+    final stdoutDone = loggerProcess.stdout
         .transform<String>(decoder)
         .transform<String>(const LineSplitter())
-        .listen(_parseLogLine);
-    loggerProcess.stderr
+        .listen(_parseLogLine)
+        .asFuture<void>();
+    final stderrDone = loggerProcess.stderr
         .transform<String>(decoder)
         .transform<String>(const LineSplitter())
-        .listen(_parseLogLine);
-    return loggerProcess.exitCode;
+        .listen(_parseLogLine)
+        .asFuture<void>();
+    final exitCode = await loggerProcess.exitCode;
+    // Wait for stream listeners so fast-failing processes (e.g. missing
+    // dylibs) still surface their stderr before we reconnect/return.
+    await Future.wait<void>([stdoutDone, stderrDone]);
+    return exitCode;
   }
 
   void _parseLogLine(String line) {
     final matches = appLogLineRegex.allMatches(line);
     if (matches.isNotEmpty) {
       logger.info(matches.first.group(1));
+      return;
+    }
+
+    // Surface loader / connection failures that would otherwise be silent —
+    // without these, preview appears "attached" but shows no Flutter logs.
+    final lower = line.toLowerCase();
+    if (lower.contains('library not loaded') ||
+        lower.contains('image not found') ||
+        lower.contains('error:') ||
+        lower.contains('unable to') ||
+        lower.contains('not connected') ||
+        lower.startsWith('[connected:')) {
+      logger.info(line);
     }
   }
 }

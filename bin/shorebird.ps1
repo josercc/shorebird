@@ -106,9 +106,20 @@ function Test-ShorebirdNeedsUpdate {
 function Update-Flutter {
     Write-Output "Updating Flutter..."
 
+    $FlutterGitUrl = if ($env:FLUTTERPATCH_FLUTTER_GIT_URL -and $env:FLUTTERPATCH_FLUTTER_GIT_URL.Trim()) {
+        $env:FLUTTERPATCH_FLUTTER_GIT_URL.Trim()
+    } else {
+        "https://gitee.com/joser_zhang_admin/flutterpatch_flutter.git"
+    }
+    $EngineCdn = if ($env:FLUTTERPATCH_ENGINE_CDN -and $env:FLUTTERPATCH_ENGINE_CDN.Trim()) {
+        $env:FLUTTERPATCH_ENGINE_CDN.Trim().TrimEnd("/")
+    } else {
+        "https://engine.flutterpatch.cn"
+    }
+
     if (!(Test-Path $flutterPath)) {
         Invoke-SilentlyIfNeeded {
-            git clone --filter=tree:0 https://github.com/shorebirdtech/flutter.git --no-checkout "$flutterPath" 
+            git clone --filter=tree:0 $FlutterGitUrl --no-checkout "$flutterPath"
         }
     }
     else {
@@ -122,9 +133,8 @@ function Update-Flutter {
         git -C "$flutterPath" -c advice.detachedHead=false checkout "$flutterVersion"
     }
 
-    # Set FLUTTER_STORAGE_BASE_URL=https://download.shorebird.dev and execute
-    # a `flutter` command to trigger a download of Dart, etc.
-    $env:FLUTTER_STORAGE_BASE_URL = 'https://download.shorebird.dev';
+    # Default engine CDN is FlutterPatch; override via FLUTTERPATCH_ENGINE_CDN.
+    $env:FLUTTER_STORAGE_BASE_URL = $EngineCdn
     & $flutter --version
     Remove-Item Env:\FLUTTER_STORAGE_BASE_URL
 }

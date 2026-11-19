@@ -164,20 +164,117 @@ class Devicectl {
     }
   }
 
+  /// Launches [bundleId] with `devicectl … launch --console`, forwarding
+  /// stdout/stderr until the app exits or the process is stopped.
+  ///
+  /// Unlike [launchApp], this stays attached (parity with Android `adb
+  /// logcat`) so preview sessions can keep showing runtime logs.
+  Future<int> launchAppAttached({
+    required String deviceId,
+    required String bundleId,
+    void Function()? onAttached,
+  }) async {
+    const failureErrorMessage = 'App launch failed';
+    final tempDir = Directory.systemTemp.createTempSync();
+    final jsonOutputFile = File(p.join(tempDir.path, 'devicectl.launch.json'));
+
+    final args = [
+      ...baseArgs,
+      'device',
+      'process',
+      'launch',
+      '--console',
+      '--terminate-existing',
+      '--device',
+      deviceId,
+      '--json-output',
+      jsonOutputFile.path,
+      bundleId,
+    ];
+
+    late final Process launchProcess;
+    try {
+      launchProcess = await process.start(executableName, args);
+    } on Exception catch (error) {
+      throw DevicectlException(
+        message: failureErrorMessage,
+        underlyingException: error,
+      );
+    }
+    onAttached?.call();
+
+    const decoder = Utf8Decoder(allowMalformed: true);
+    launchProcess.stdout
+        .transform<String>(decoder)
+        .transform<String>(const LineSplitter())
+        .listen((line) {
+          if (line.trim().isEmpty) return;
+          logger.info(line);
+        });
+    launchProcess.stderr
+        .transform<String>(decoder)
+        .transform<String>(const LineSplitter())
+        .listen((line) {
+          if (line.trim().isEmpty) return;
+          logger.detail(line);
+        });
+
+    final exitCode = await launchProcess.exitCode;
+
+    if (jsonOutputFile.existsSync()) {
+      try {
+        final json = jsonDecode(jsonOutputFile.readAsStringSync()) as Json;
+        final maybeError = _getErrorFromOutputJson(json);
+        if (maybeError != null) {
+          throw DevicectlException(
+            message: failureErrorMessage,
+            underlyingException: Exception(maybeError),
+          );
+        }
+      } on DevicectlException {
+        rethrow;
+      } on Exception catch (error) {
+        logger.detail('Unable to parse launch json output: $error');
+      }
+    } else if (exitCode != ExitCode.success.code) {
+      throw DevicectlException(
+        message: failureErrorMessage,
+        underlyingException: Exception(
+          'devicectl exited with code $exitCode',
+        ),
+      );
+    }
+
+    return exitCode;
+  }
+
+  /// Best-effort Flutter/OSLog tail. Failures here must not end preview;
+  /// [launchAppAttached] is the session keep-alive.
+  Future<void> _streamSyslogWithReconnect(AppleDevice device) async {
+    while (true) {
+      try {
+        final code = await idevicesyslog.startLogger(device: device);
+        logger.detail('idevicesyslog exited with code $code');
+      } on Exception catch (error) {
+        logger.detail('idevicesyslog failed: $error');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+  }
+
   /// Installs and launches the given [runnerAppDirectory] on [device]. [device]
   /// should be obtained using [listAvailableIosDevices]. After successfully
-  /// launching the app, this method will start a logger process to capture
-  /// logs from the device.
+  /// launching the app, this method keeps streaming device logs (like Android
+  /// `adb logcat`) until the process is stopped.
   Future<int> installAndLaunchApp({
     required Directory runnerAppDirectory,
     required AppleDevice device,
   }) async {
     final installProgress = logger.progress('Installing app');
 
-    // Start the logger before launching the app to ensure we capture all
-    // logs. Starting the logger process after launching the app can result
-    // in missing some shorebird logs.
-    final loggerExitCodeFuture = idevicesyslog.startLogger(device: device);
+    // Capture Flutter/OSLog lines in parallel. Started before install so early
+    // updater logs are not missed; reconnects if the syslog process drops.
+    unawaited(_streamSyslogWithReconnect(device));
 
     final String bundleId;
     try {
@@ -193,17 +290,21 @@ class Devicectl {
 
     final launchProgress = logger.progress('Launching app');
     try {
-      await launchApp(deviceId: device.udid, bundleId: bundleId);
+      return await launchAppAttached(
+        deviceId: device.udid,
+        bundleId: bundleId,
+        onAttached: () {
+          launchProgress.complete();
+          logger.info(
+            'App launched. Streaming Flutter device logs — stop the preview '
+            'to end.',
+          );
+        },
+      );
     } on Exception catch (error) {
       launchProgress.fail('Failed to launch app: $error');
       return ExitCode.software.code;
     }
-    launchProgress.complete();
-
-    final loggerExitCode = await loggerExitCodeFuture;
-    logger.detail('idevicesyslog exited with code $loggerExitCode');
-
-    return ExitCode.success.code;
   }
 
   /// Lists iOS devices that we can install and launch apps on. Excludes

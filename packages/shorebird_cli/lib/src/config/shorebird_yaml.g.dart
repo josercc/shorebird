@@ -25,6 +25,7 @@ ShorebirdYaml _$ShorebirdYamlFromJson(Map json) => $checkedCreate(
         'flutter',
         'android',
         'ios',
+        'preview',
       ],
     );
     final val = ShorebirdYaml(
@@ -39,10 +40,7 @@ ShorebirdYaml _$ShorebirdYamlFromJson(Map json) => $checkedCreate(
         'patch_verification',
         (v) => $enumDecodeNullable(_$PatchVerificationEnumMap, v),
       ),
-      uploadBaselines: $checkedConvert(
-        'upload_baselines',
-        (v) => v as bool?,
-      ),
+      uploadBaselines: $checkedConvert('upload_baselines', (v) => v as bool?),
       uploadPatchResources: $checkedConvert(
         'upload_patch_resources',
         (v) => v as bool?,
@@ -50,6 +48,10 @@ ShorebirdYaml _$ShorebirdYamlFromJson(Map json) => $checkedCreate(
       flutter: $checkedConvert('flutter', (v) => v as String?),
       android: $checkedConvert('android', (v) => v as String?),
       ios: $checkedConvert('ios', (v) => v as String?),
+      preview: $checkedConvert(
+        'preview',
+        (v) => v == null ? null : PreviewConfig.fromJson(v as Map),
+      ),
     );
     return val;
   },
@@ -76,9 +78,124 @@ Map<String, dynamic> _$ShorebirdYamlToJson(
   'flutter': instance.flutter,
   'android': instance.android,
   'ios': instance.ios,
+  'preview': instance.preview?.toJson(),
 };
 
 const _$PatchVerificationEnumMap = {
   PatchVerification.strict: 'strict',
   PatchVerification.installOnly: 'install_only',
 };
+
+PreviewConfig _$PreviewConfigFromJson(Map json) =>
+    $checkedCreate('PreviewConfig', json, ($checkedConvert) {
+      $checkKeys(json, allowedKeys: const ['android', 'ios']);
+      final val = PreviewConfig(
+        android: $checkedConvert(
+          'android',
+          (v) => v == null ? null : PreviewAndroidConfig.fromJson(v as Map),
+        ),
+        ios: $checkedConvert(
+          'ios',
+          (v) => v == null ? null : PreviewIosConfig.fromJson(v as Map),
+        ),
+      );
+      return val;
+    });
+
+Map<String, dynamic> _$PreviewConfigToJson(PreviewConfig instance) =>
+    <String, dynamic>{
+      'android': instance.android?.toJson(),
+      'ios': instance.ios?.toJson(),
+    };
+
+PreviewAndroidConfig _$PreviewAndroidConfigFromJson(Map json) => $checkedCreate(
+  'PreviewAndroidConfig',
+  json,
+  ($checkedConvert) {
+    $checkKeys(
+      json,
+      allowedKeys: const [
+        'host_project',
+        'artifact_dir',
+        'application_id',
+        'assemble_task',
+        'build_number',
+      ],
+    );
+    final val = PreviewAndroidConfig(
+      hostProject: $checkedConvert('host_project', (v) => v as String),
+      artifactDir: $checkedConvert('artifact_dir', (v) => v as String),
+      applicationId: $checkedConvert('application_id', (v) => v as String),
+      assembleTask: $checkedConvert(
+        'assemble_task',
+        (v) => v as String? ?? ':app:assembleRelease',
+      ),
+      buildNumber: $checkedConvert(
+        'build_number',
+        (v) => v as String? ?? '1.0',
+      ),
+    );
+    return val;
+  },
+  fieldKeyMap: const {
+    'hostProject': 'host_project',
+    'artifactDir': 'artifact_dir',
+    'applicationId': 'application_id',
+    'assembleTask': 'assemble_task',
+    'buildNumber': 'build_number',
+  },
+);
+
+Map<String, dynamic> _$PreviewAndroidConfigToJson(
+  PreviewAndroidConfig instance,
+) => <String, dynamic>{
+  'host_project': instance.hostProject,
+  'artifact_dir': instance.artifactDir,
+  'application_id': instance.applicationId,
+  'assemble_task': instance.assembleTask,
+  'build_number': instance.buildNumber,
+};
+
+PreviewIosConfig _$PreviewIosConfigFromJson(Map json) => $checkedCreate(
+  'PreviewIosConfig',
+  json,
+  ($checkedConvert) {
+    $checkKeys(
+      json,
+      allowedKeys: const [
+        'host_project',
+        'frameworks_dir',
+        'scheme',
+        'configuration',
+        'workspace',
+        'xcodeproj',
+      ],
+    );
+    final val = PreviewIosConfig(
+      hostProject: $checkedConvert('host_project', (v) => v as String),
+      frameworksDir: $checkedConvert('frameworks_dir', (v) => v as String),
+      scheme: $checkedConvert('scheme', (v) => v as String),
+      configuration: $checkedConvert(
+        'configuration',
+        (v) => v as String? ?? 'Release',
+      ),
+      workspace: $checkedConvert('workspace', (v) => v as String?),
+      xcodeproj: $checkedConvert('xcodeproj', (v) => v as String?),
+    );
+    return val;
+  },
+  fieldKeyMap: const {
+    'hostProject': 'host_project',
+    'frameworksDir': 'frameworks_dir',
+  },
+);
+
+Map<String, dynamic> _$PreviewIosConfigToJson(PreviewIosConfig instance) =>
+    <String, dynamic>{
+      'host_project': instance.hostProject,
+      'frameworks_dir': instance.frameworksDir,
+      'scheme': instance.scheme,
+      'configuration': instance.configuration,
+      'workspace': instance.workspace,
+      'xcodeproj': instance.xcodeproj,
+    };

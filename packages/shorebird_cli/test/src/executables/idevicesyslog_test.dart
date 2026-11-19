@@ -151,6 +151,30 @@ Nov 10 17:58:47 kernel(Sandbox)[0] <Error>: Sandbox: Runner(52662) deny(1) iokit
         },
       );
 
+      test('logs flutter lines at any syslog level', () async {
+        stdoutOutput =
+            'Nov 10 14:46:57 Runner(Flutter)[1044] <Error>: flutter: boom\n';
+        stderrOutput = '';
+        await runWithOverrides(
+          () => idevicesyslog.startLogger(device: device),
+        );
+
+        verify(() => logger.info('flutter: boom')).called(1);
+      });
+
+      test('surfaces dyld load failures that block logging', () async {
+        stdoutOutput = '';
+        stderrOutput =
+            'dyld[1]: Library not loaded: @loader_path/../libusbmuxd-2.0.7.dylib\n';
+        await runWithOverrides(
+          () => idevicesyslog.startLogger(device: device),
+        );
+
+        verify(
+          () => logger.info(any(that: contains('Library not loaded'))),
+        ).called(1);
+      });
+
       test('handles non-UTF8 bytes in output without throwing', () async {
         // Create byte sequences with invalid UTF-8: 0xFF is not valid in UTF-8
         // "flutter: hello" + 0xFF for stdout, "flutter: error" + 0xFF for

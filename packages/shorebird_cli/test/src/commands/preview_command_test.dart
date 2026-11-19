@@ -48,8 +48,10 @@ void main() {
     late ArgResults argResults;
     late ArtifactManager artifactManager;
     late Auth auth;
+    late Adb adb;
     late Cache cache;
     late CodePushClientWrapper codePushClientWrapper;
+    late Devicectl devicectl;
     late ShorebirdLogger logger;
     late Directory previewDirectory;
     late Platform platform;
@@ -181,10 +183,12 @@ void main() {
         () => runScoped(
           body,
           values: {
+            adbRef.overrideWith(() => adb),
             artifactManagerRef.overrideWith(() => artifactManager),
             authRef.overrideWith(() => auth),
             cacheRef.overrideWith(() => cache),
             codePushClientWrapperRef.overrideWith(() => codePushClientWrapper),
+            devicectlRef.overrideWith(() => devicectl),
             httpClientRef.overrideWith(() => httpClient),
             loggerRef.overrideWith(() => logger),
             platformRef.overrideWith(() => platform),
@@ -215,6 +219,9 @@ void main() {
       registerFallbackValue(ReleasePlatform.android);
       registerFallbackValue(StreamController<List<int>>());
       registerFallbackValue(Uri());
+      registerFallbackValue(
+        const AndroidDevice(id: 'emulator-5554', model: 'sdk'),
+      );
     });
 
     setUp(() {
@@ -223,8 +230,10 @@ void main() {
       argResults = MockArgResults();
       artifactManager = MockArtifactManager();
       auth = MockAuth();
+      adb = MockAdb();
       cache = MockCache();
       codePushClientWrapper = MockCodePushClientWrapper();
+      devicectl = MockDevicectl();
       logger = MockShorebirdLogger();
       platform = MockPlatform();
       previewDirectory = Directory.systemTemp.createTempSync();
@@ -239,6 +248,7 @@ void main() {
       when(() => argResults['app-id']).thenReturn(appId);
       when(() => argResults['release-version']).thenReturn(releaseVersion);
       when(() => argResults['staging']).thenReturn(false);
+      when(() => argResults['device-id']).thenReturn(null);
       when(
         () => argResults['track'],
       ).thenReturn(DeploymentTrack.stable.channel);
@@ -246,6 +256,14 @@ void main() {
       when(() => argResults.wasParsed('staging')).thenReturn(false);
       when(() => auth.isAuthenticated).thenReturn(true);
       when(() => cache.getPreviewDirectory(any())).thenReturn(previewDirectory);
+      when(() => adb.listDevices()).thenAnswer(
+        (_) async => const [
+          AndroidDevice(id: 'emulator-5554', model: 'sdk gphone'),
+        ],
+      );
+      when(
+        () => devicectl.listAvailableIosDevices(),
+      ).thenAnswer((_) async => []);
       when(
         () => codePushClientWrapper.getApps(),
       ).thenAnswer((_) async => [app]);
@@ -278,6 +296,7 @@ void main() {
       when(() => logger.progress(any())).thenReturn(progress);
       when(() => progress.fail(any())).thenReturn(null);
       when(() => shorebirdEnv.getShorebirdYaml()).thenReturn(null);
+      when(() => shorebirdEnv.isFlutterModule).thenReturn(false);
       when(
         () => shorebirdValidator.validatePreconditions(
           checkUserIsAuthenticated: any(named: 'checkUserIsAuthenticated'),
@@ -329,6 +348,56 @@ void main() {
           () => shorebirdValidator.validatePreconditions(
             checkUserIsAuthenticated: true,
           ),
+        ).called(1);
+      });
+    });
+
+    group('when project is a Flutter module', () {
+      setUp(() {
+        when(() => shorebirdEnv.isFlutterModule).thenReturn(true);
+        when(() => argResults['platform']).thenReturn('android');
+        when(() => release.platformStatuses).thenReturn({
+          ReleasePlatform.android: ReleaseStatus.active,
+        });
+      });
+
+      test('prompts for shorebird.yaml preview config when missing', () async {
+        await expectLater(
+          runWithOverrides(command.run),
+          completion(equals(ExitCode.usage.code)),
+        );
+        verify(
+          () => logger.err(
+            any(
+              that: allOf([
+                contains('preview:'),
+                contains('host_project:'),
+                contains('application_id:'),
+              ]),
+            ),
+          ),
+        ).called(1);
+        verifyNever(
+          () => codePushClientWrapper.getReleases(
+            appId: any(named: 'appId'),
+            sideloadableOnly: true,
+          ),
+        );
+      });
+
+      test('prompts for ios preview config when platform is ios', () async {
+        when(() => argResults['platform']).thenReturn('ios');
+        when(() => platform.isMacOS).thenReturn(true);
+        when(() => release.platformStatuses).thenReturn({
+          ReleasePlatform.ios: ReleaseStatus.active,
+        });
+
+        await expectLater(
+          runWithOverrides(command.run),
+          completion(equals(ExitCode.usage.code)),
+        );
+        verify(
+          () => logger.err(any(that: contains('frameworks_dir:'))),
         ).called(1);
       });
     });
@@ -490,6 +559,11 @@ void main() {
             deviceId: any(named: 'deviceId'),
           ),
         ).thenAnswer((_) async {});
+        when(() => adb.listDevices()).thenAnswer(
+          (_) async => const [
+            AndroidDevice(id: 'emulator-5554', model: 'sdk gphone'),
+          ],
+        );
         when(
           () => adb.clearAppData(
             package: any(named: 'package'),
@@ -518,6 +592,89 @@ void main() {
         when(() => release.platformStatuses).thenReturn({
           ReleasePlatform.android: ReleaseStatus.active,
           ReleasePlatform.ios: ReleaseStatus.active,
+        });
+      });
+
+      group('device selection', () {
+        setUp(() async {
+          await createAabFile(channel: null);
+          when(
+            () => artifactManager.extractZip(
+              zipFile: any(named: 'zipFile'),
+              outputDirectory: any(named: 'outputDirectory'),
+            ),
+          ).thenAnswer(setupAndroidShorebirdYaml);
+        });
+
+        test('auto-selects when only one device is connected', () async {
+          when(() => adb.listDevices()).thenAnswer(
+            (_) async => const [AndroidDevice(id: 'only-device')],
+          );
+
+          await runWithOverrides(command.run);
+
+          verify(() => logger.info('Using device only-device')).called(1);
+          verifyNever(
+            () => logger.chooseOne<AndroidDevice>(
+              any(),
+              choices: any(named: 'choices'),
+              display: any(named: 'display'),
+              hint: any(named: 'hint'),
+            ),
+          );
+          verify(
+            () => bundletool.installApks(
+              apks: any(named: 'apks'),
+              deviceId: 'only-device',
+            ),
+          ).called(1);
+        });
+
+        test('prompts when multiple devices are connected', () async {
+          const devices = [
+            AndroidDevice(id: 'device-a', model: 'Pixel'),
+            AndroidDevice(id: 'device-b', model: 'Pixel 2'),
+          ];
+          when(() => adb.listDevices()).thenAnswer((_) async => devices);
+          when(
+            () => logger.chooseOne<AndroidDevice>(
+              any(),
+              choices: any(named: 'choices'),
+              display: any(named: 'display'),
+              hint: any(named: 'hint'),
+            ),
+          ).thenReturn(devices.last);
+
+          await runWithOverrides(command.run);
+
+          verify(
+            () => logger.chooseOne<AndroidDevice>(
+              'Which device would you like to preview on?',
+              choices: devices,
+              display: any(named: 'display'),
+              hint: any(named: 'hint'),
+            ),
+          ).called(1);
+          verify(
+            () => bundletool.installApks(
+              apks: any(named: 'apks'),
+              deviceId: 'device-b',
+            ),
+          ).called(1);
+        });
+
+        test('exits when no devices are connected', () async {
+          when(() => adb.listDevices()).thenAnswer((_) async => []);
+
+          await expectLater(
+            runWithOverrides(command.run),
+            completion(equals(ExitCode.software.code)),
+          );
+          verify(
+            () => logger.err(
+              'No Android devices found. Connect a device or start an emulator.',
+            ),
+          ).called(1);
         });
       });
 
@@ -555,7 +712,12 @@ void main() {
           test('does not prompt for platform, uses android', () async {
             await runWithOverrides(command.run);
 
-            verify(() => bundletool.installApks(apks: apksPath())).called(1);
+            verify(
+              () => bundletool.installApks(
+                apks: apksPath(),
+                deviceId: any(named: 'deviceId'),
+              ),
+            ).called(1);
             verifyNever(
               () => logger.chooseOne<String>(
                 any(),
@@ -953,14 +1115,22 @@ channel: ${track.channel}
 
           final exception = Exception('oops');
           when(
-            () => bundletool.installApks(apks: any(named: 'apks')),
+            () => bundletool.installApks(
+              apks: any(named: 'apks'),
+              deviceId: any(named: 'deviceId'),
+            ),
           ).thenThrow(exception);
         });
 
         test('exits with code 70', () async {
           final result = await runWithOverrides(command.run);
           expect(result, equals(ExitCode.software.code));
-          verify(() => bundletool.installApks(apks: apksPath())).called(1);
+          verify(
+            () => bundletool.installApks(
+              apks: apksPath(),
+              deviceId: any(named: 'deviceId'),
+            ),
+          ).called(1);
         });
       });
 
@@ -975,14 +1145,22 @@ channel: ${track.channel}
 
           final exception = Exception('oops');
           when(
-            () => adb.clearAppData(package: any(named: 'package')),
+            () => adb.clearAppData(
+              package: any(named: 'package'),
+              deviceId: any(named: 'deviceId'),
+            ),
           ).thenThrow(exception);
         });
 
         test('exits with code 70', () async {
           final result = await runWithOverrides(command.run);
           expect(result, equals(ExitCode.software.code));
-          verify(() => adb.clearAppData(package: packageName)).called(1);
+          verify(
+            () => adb.clearAppData(
+              package: packageName,
+              deviceId: any(named: 'deviceId'),
+            ),
+          ).called(1);
         });
       });
 
@@ -997,14 +1175,22 @@ channel: ${track.channel}
 
           final exception = Exception('oops');
           when(
-            () => adb.startApp(package: any(named: 'package')),
+            () => adb.startApp(
+              package: any(named: 'package'),
+              deviceId: any(named: 'deviceId'),
+            ),
           ).thenThrow(exception);
         });
 
         test('exits with code 70', () async {
           final result = await runWithOverrides(command.run);
           expect(result, equals(ExitCode.software.code));
-          verify(() => adb.startApp(package: packageName)).called(1);
+          verify(
+            () => adb.startApp(
+              package: packageName,
+              deviceId: any(named: 'deviceId'),
+            ),
+          ).called(1);
         });
       });
 
@@ -1023,7 +1209,12 @@ channel: ${track.channel}
         test('exits with non-zero exit code', () async {
           final result = await runWithOverrides(command.run);
           expect(result, equals(1));
-          verify(() => adb.logcat(filter: 'flutter')).called(1);
+          verify(
+            () => adb.logcat(
+              filter: 'flutter',
+              deviceId: any(named: 'deviceId'),
+            ),
+          ).called(1);
         });
       });
 
@@ -1504,6 +1695,9 @@ channel: ${track.channel}
           () => devicectl.deviceForLaunch(deviceId: any(named: 'deviceId')),
         ).thenAnswer((_) async => null);
         when(
+          () => devicectl.listAvailableIosDevices(),
+        ).thenAnswer((_) async => []);
+        when(
           () => devicectl.listAllIosDevices(),
         ).thenAnswer((_) async => []);
         when(
@@ -1526,6 +1720,67 @@ channel: ${track.channel}
         when(() => releaseArtifact.url).thenReturn(releaseArtifactUrl);
         when(() => releaseArtifact.arch).thenReturn('app');
         when(() => platform.isMacOS).thenReturn(true);
+      });
+
+      group('device selection', () {
+        setUp(() {
+          setupIOSShorebirdYaml();
+        });
+
+        test('prompts when multiple iOS devices are connected', () async {
+          final devices = [
+            const AppleDevice(
+              deviceProperties: DeviceProperties(name: 'iPhone 12'),
+              hardwareProperties: HardwareProperties(
+                platform: 'iOS',
+                udid: 'udid-a',
+              ),
+              connectionProperties: ConnectionProperties(
+                transportType: 'wired',
+                tunnelState: 'connected',
+              ),
+            ),
+            const AppleDevice(
+              deviceProperties: DeviceProperties(name: 'iPhone 13'),
+              hardwareProperties: HardwareProperties(
+                platform: 'iOS',
+                udid: 'udid-b',
+              ),
+              connectionProperties: ConnectionProperties(
+                transportType: 'wired',
+                tunnelState: 'connected',
+              ),
+            ),
+          ];
+          when(
+            () => devicectl.listAvailableIosDevices(),
+          ).thenAnswer((_) async => devices);
+          when(
+            () => logger.chooseOne<AppleDevice>(
+              any(),
+              choices: any(named: 'choices'),
+              display: any(named: 'display'),
+              hint: any(named: 'hint'),
+            ),
+          ).thenReturn(devices.last);
+          when(
+            () => devicectl.deviceForLaunch(deviceId: any(named: 'deviceId')),
+          ).thenAnswer((_) async => devices.last);
+          when(
+            () => devicectl.listAvailableIosDevices(),
+          ).thenAnswer((_) async => devices);
+
+          await runWithOverrides(command.run);
+
+          verify(
+            () => logger.chooseOne<AppleDevice>(
+              'Which device would you like to preview on?',
+              choices: devices,
+              display: any(named: 'display'),
+              hint: any(named: 'hint'),
+            ),
+          ).called(1);
+        });
       });
 
       test('ensures ios-deploy is installed', () async {
@@ -2868,6 +3123,11 @@ channel: ${DeploymentTrack.staging.channel}
 
         when(() => appleDevice.name).thenReturn('iPhone 12');
         when(() => appleDevice.udid).thenReturn('12345678-1234567890ABCDEF');
+        when(() => adb.listDevices()).thenAnswer(
+          (_) async => const [
+            AndroidDevice(id: 'emulator-5554', model: 'sdk gphone'),
+          ],
+        );
         when(
           () => artifactManager.downloadWithProgressUpdates(
             any(),
@@ -2885,6 +3145,9 @@ channel: ${DeploymentTrack.staging.channel}
         when(
           () => devicectl.deviceForLaunch(deviceId: any(named: 'deviceId')),
         ).thenAnswer((_) async => null);
+        when(
+          () => devicectl.listAvailableIosDevices(),
+        ).thenAnswer((_) async => []);
         when(
           () => devicectl.listAllIosDevices(),
         ).thenAnswer((_) async => []);

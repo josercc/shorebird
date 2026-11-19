@@ -30,6 +30,7 @@ class ShorebirdYaml {
     this.flutter,
     this.android,
     this.ios,
+    this.preview,
   });
 
   /// Creates a [ShorebirdYaml] from a JSON map.
@@ -94,21 +95,149 @@ class ShorebirdYaml {
   /// release baseline uploads.
   final String? flutter;
 
-  /// Android project directory for OTA snapshot scans.
+  /// Android project directory for OTA snapshot scans and module preview.
   ///
   /// Relative paths are resolved against the directory that contains
   /// `shorebird.yaml`. When omitted, `<flutter>/android` is used if it
-  /// exists. Only needed by `upload-snapshot` / `check-ota` (not
-  /// `upload-resources`).
+  /// exists for `upload-snapshot` / `check-ota`. For Flutter module
+  /// `preview`, this path is also used as the native host when
+  /// `preview.android.host_project` is omitted.
   final String? android;
 
-  /// iOS project directory for OTA snapshot scans.
+  /// iOS project directory for OTA snapshot scans and module preview.
   ///
   /// Relative paths are resolved against the directory that contains
   /// `shorebird.yaml`. When omitted, `<flutter>/ios` is used if it
-  /// exists. Only needed by `upload-snapshot` / `check-ota` (not
-  /// `upload-resources`).
+  /// exists for `upload-snapshot` / `check-ota`. For Flutter module
+  /// `preview`, this path is also used as the native host when
+  /// `preview.ios.host_project` is omitted.
   final String? ios;
+
+  /// Optional overrides for Flutter module (`aar` / `ios-framework`) preview.
+  ///
+  /// When omitted, module preview falls back to top-level [android] / [ios]
+  /// for the host project path and infers remaining settings (for example
+  /// `application_id` from the host Gradle files). Use this block only when
+  /// you need to override artifact locations, scheme, assemble task, etc.
+  final PreviewConfig? preview;
+}
+
+/// {@template preview_config}
+/// Host project settings used by module preview.
+/// {@endtemplate}
+@JsonSerializable(anyMap: true, disallowUnrecognizedKeys: true)
+class PreviewConfig {
+  /// {@macro preview_config}
+  const PreviewConfig({this.android, this.ios});
+
+  /// Creates a [PreviewConfig] from a JSON map.
+  factory PreviewConfig.fromJson(Map<dynamic, dynamic> json) =>
+      _$PreviewConfigFromJson(json);
+
+  /// Converts this [PreviewConfig] to a JSON map.
+  Map<String, dynamic> toJson() => _$PreviewConfigToJson(this);
+
+  /// Android host settings for `aar` module preview.
+  final PreviewAndroidConfig? android;
+
+  /// iOS host settings for `ios-framework` module preview.
+  final PreviewIosConfig? ios;
+}
+
+/// {@template preview_android_config}
+/// Android host settings for module preview.
+/// {@endtemplate}
+@JsonSerializable(anyMap: true, disallowUnrecognizedKeys: true)
+class PreviewAndroidConfig {
+  /// {@macro preview_android_config}
+  const PreviewAndroidConfig({
+    required this.hostProject,
+    required this.artifactDir,
+    required this.applicationId,
+    this.assembleTask = ':app:assembleRelease',
+    this.buildNumber = '1.0',
+  });
+
+  /// Creates a [PreviewAndroidConfig] from a JSON map.
+  factory PreviewAndroidConfig.fromJson(Map<dynamic, dynamic> json) =>
+      _$PreviewAndroidConfigFromJson(json);
+
+  /// Converts this [PreviewAndroidConfig] to a JSON map.
+  Map<String, dynamic> toJson() => _$PreviewAndroidConfigToJson(this);
+
+  /// Path to the native Android host project root (contains `gradlew`).
+  ///
+  /// Relative paths are resolved against the directory that contains
+  /// `shorebird.yaml`.
+  final String hostProject;
+
+  /// Maven repository directory that receives the downloaded `aar`
+  /// (typically the module's `release/` directory referenced by the host).
+  ///
+  /// Relative paths are resolved against the directory that contains
+  /// `shorebird.yaml`.
+  final String artifactDir;
+
+  /// Application id of the host app (used for `adb` clear/start/logcat).
+  final String applicationId;
+
+  /// Gradle task used to build an installable host APK
+  /// (default `:app:assembleRelease`).
+  final String assembleTask;
+
+  /// AAR Maven version / build number (matches `flutter build aar
+  /// --build-number`, default `1.0`).
+  final String buildNumber;
+}
+
+/// {@template preview_ios_config}
+/// iOS host settings for module preview.
+/// {@endtemplate}
+@JsonSerializable(anyMap: true, disallowUnrecognizedKeys: true)
+class PreviewIosConfig {
+  /// {@macro preview_ios_config}
+  const PreviewIosConfig({
+    required this.hostProject,
+    required this.frameworksDir,
+    required this.scheme,
+    this.configuration = 'Release',
+    this.workspace,
+    this.xcodeproj,
+  });
+
+  /// Creates a [PreviewIosConfig] from a JSON map.
+  factory PreviewIosConfig.fromJson(Map<dynamic, dynamic> json) =>
+      _$PreviewIosConfigFromJson(json);
+
+  /// Converts this [PreviewIosConfig] to a JSON map.
+  Map<String, dynamic> toJson() => _$PreviewIosConfigToJson(this);
+
+  /// Path to the native iOS host project root.
+  ///
+  /// Relative paths are resolved against the directory that contains
+  /// `shorebird.yaml`.
+  final String hostProject;
+
+  /// Directory that contains `App.xcframework` (replaced during preview).
+  ///
+  /// Relative paths are resolved against the directory that contains
+  /// `shorebird.yaml`.
+  final String frameworksDir;
+
+  /// Xcode scheme used to build and install the host app.
+  final String scheme;
+
+  /// Xcode build configuration (default `Release`).
+  final String configuration;
+
+  /// Optional path to an `.xcworkspace` (relative to [hostProject] or
+  /// absolute). When omitted, the first workspace under [hostProject] is
+  /// used when present.
+  final String? workspace;
+
+  /// Optional path to an `.xcodeproj` (relative to [hostProject] or
+  /// absolute). Used when [workspace] is not set / not found.
+  final String? xcodeproj;
 }
 
 /// Extension on [ShorebirdYaml] to get the app id for a specific flavor.

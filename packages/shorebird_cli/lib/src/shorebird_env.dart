@@ -343,6 +343,15 @@ class ShorebirdEnv {
     return module?['androidPackage'] as String?;
   }
 
+  /// Whether the current project is a Flutter module (add-to-app).
+  ///
+  /// True when `pubspec.yaml` declares a `flutter > module` section.
+  bool get isFlutterModule {
+    final pubspec = getPubspecYaml();
+    final module = pubspec?.flutter?['module'] as Map?;
+    return module != null;
+  }
+
   /// The base URL for the Shorebird auth service. Can be overridden with the
   /// `AUTH_SERVICE_URL` environment variable. Defaults to
   /// `https://auth.shorebird.dev`.
