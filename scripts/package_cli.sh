@@ -99,6 +99,16 @@ mkdir -p "$STAGE/bin/internal"
 echo "==> pub get (workspace)"
 (cd "$ROOT" && dart pub get)
 
+# packageVersion is generated into lib/src/version.dart from pubspec.yaml.
+# Archive names use pubspec; --version uses version.dart — keep them in sync.
+echo "==> build_runner (sync lib/src/version.dart → ${VERSION})"
+(cd "$ROOT/packages/shorebird_cli" && dart run build_runner build)
+if ! grep -q "packageVersion = '${VERSION}'" "$ROOT/packages/shorebird_cli/lib/src/version.dart"; then
+  echo "Error: version.dart does not match pubspec version ${VERSION}" >&2
+  cat "$ROOT/packages/shorebird_cli/lib/src/version.dart" >&2
+  exit 1
+fi
+
 BIN_NAME="flutterpatch"
 if [[ "$OS" == "windows" ]]; then
   BIN_NAME="flutterpatch.exe"
