@@ -98,6 +98,7 @@ void main() {
     });
 
     setUp(() {
+      clearCliDeviceIdCache();
       credentialsDir = Directory.systemTemp.createTempSync().path;
       httpClient = MockHttpClient();
       logger = MockShorebirdLogger();
@@ -204,6 +205,8 @@ void main() {
       test('attaches Bearer header when authenticated', () async {
         when(() => platform.environment).thenReturn(<String, String>{
           shorebirdTokenEnvVar: 'env-token',
+          flutterpatchDeviceIdEnvVar: 'test-device-xyz',
+          flutterpatchMachineFingerprintEnvVar: 'fp-xyz',
         });
         when(() => httpClient.send(any())).thenAnswer(
           (_) async =>
@@ -218,6 +221,14 @@ void main() {
         final captured = verify(() => httpClient.send(captureAny())).captured;
         final request = captured.single as http.BaseRequest;
         expect(request.headers['Authorization'], equals('Bearer env-token'));
+        expect(
+          request.headers[flutterpatchDeviceIdHeader],
+          equals('test-device-xyz'),
+        );
+        expect(
+          request.headers[flutterpatchMachineFingerprintHeader],
+          equals('fp-xyz'),
+        );
       });
 
       test('returns plain client when unauthenticated', () {

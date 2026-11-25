@@ -12,7 +12,10 @@ import 'package:shorebird_cli/src/platform.dart';
 import 'package:shorebird_cli/src/shorebird_cli_command_runner.dart';
 import 'package:shorebird_cli/src/shorebird_env.dart';
 
+import 'device_id.dart';
+
 export 'ci_token.dart';
+export 'device_id.dart';
 
 /// A reference to an [Auth] instance.
 final authRef = create(Auth.new);
@@ -28,21 +31,41 @@ String normalizeAuthUrl(Uri uri) {
   return uri.toString().replaceAll(RegExp(r'/+$'), '');
 }
 
-/// HTTP client that attaches a Bearer token on every request.
+/// HTTP client that attaches a Bearer token and machine-bound device headers.
 class BearerTokenClient extends http.BaseClient {
   /// Creates a bearer token client.
   BearerTokenClient({
     required String token,
     required http.Client httpClient,
+    String? deviceId,
+    String? machineFingerprint,
   }) : _token = token,
-       _baseClient = httpClient;
+       _baseClient = httpClient,
+       _deviceId = (deviceId ?? resolveCliDeviceId()).trim(),
+       _machineFingerprint =
+           (machineFingerprint ?? resolveCliMachineFingerprint()).trim();
 
   final String _token;
   final http.Client _baseClient;
+  final String _deviceId;
+  final String _machineFingerprint;
+
+  /// Device id sent as [flutterpatchDeviceIdHeader] (API key binding).
+  String get deviceId => _deviceId;
+
+  /// Live machine fingerprint for [flutterpatchMachineFingerprintHeader].
+  String get machineFingerprint => _machineFingerprint;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) {
     request.headers['Authorization'] = 'Bearer $_token';
+    if (_deviceId.isNotEmpty) {
+      request.headers[flutterpatchDeviceIdHeader] = _deviceId;
+    }
+    if (_machineFingerprint.isNotEmpty) {
+      request.headers[flutterpatchMachineFingerprintHeader] =
+          _machineFingerprint;
+    }
     return _baseClient.send(request);
   }
 }
@@ -82,6 +105,10 @@ class Auth {
       return BearerTokenClient(
         token: _bearerToken!,
         httpClient: _httpClient,
+        deviceId: resolveCliDeviceId(environment: platform.environment),
+        machineFingerprint: resolveCliMachineFingerprint(
+          environment: platform.environment,
+        ),
       );
     }
     return _httpClient;
