@@ -261,6 +261,115 @@ void main() {
       expect(patchBody!['hash'], hash);
     });
 
+    test(
+      'upload init hash is content sha256 even when patch hash differs (diff)',
+      () async {
+      // Shorebird patchers upload a diff file but pass the full AOT snapshot
+      // hash on the patch record. Upload integrity must use the diff bytes.
+      final payload = Uint8List(
+        CodePushClient.chunkedUploadThresholdBytes + 50,
+      );
+      for (var i = 0; i < payload.length; i++) {
+        payload[i] = (i * 7) % 251;
+      }
+      final contentHash = sha256.convert(payload).toString();
+      const semanticHash =
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      expect(semanticHash, isNot(contentHash));
+      const uploadId = 'upload-diff-hash';
+      const chunkSize = CodePushClient.uploadChunkBytes;
+      final totalChunks = (payload.length + chunkSize - 1) ~/ chunkSize;
+
+      String? uploadInitHash;
+      Map<String, dynamic>? patchBody;
+
+      when(() => httpClient.send(any())).thenAnswer((invocation) async {
+        final request =
+            invocation.positionalArguments.first as http.BaseRequest;
+        final path = request.url.path;
+
+        if (request.method == 'POST' && path.endsWith('/uploads')) {
+          if (request is http.Request) {
+            final body = json.decode(request.body) as Map<String, dynamic>;
+            uploadInitHash = body['hash'] as String?;
+          } else if (request is http.StreamedRequest) {
+            final bytes = <int>[];
+            await for (final c in request.finalize()) {
+              bytes.addAll(c);
+            }
+            final body =
+                json.decode(utf8.decode(bytes)) as Map<String, dynamic>;
+            uploadInitHash = body['hash'] as String?;
+          }
+          return jsonResponse({
+            'upload_id': uploadId,
+            'chunk_size': chunkSize,
+            'size_bytes': payload.length,
+            'total_chunks': totalChunks,
+          }, status: 201);
+        }
+        if (request.method == 'PUT' && path.contains('/chunks/')) {
+          if (request is http.StreamedRequest) {
+            await request.finalize().drain<void>();
+          }
+          return jsonResponse({'ok': true});
+        }
+        if (request.method == 'POST' && path.endsWith('/complete')) {
+          return jsonResponse({
+            'path': 'obj/diff.bin',
+            'hash': contentHash,
+            'size_bytes': payload.length,
+          }, status: 201);
+        }
+        if (request.method == 'POST' && path.endsWith('/patches')) {
+          if (request is http.Request) {
+            patchBody = json.decode(request.body) as Map<String, dynamic>;
+          } else if (request is http.StreamedRequest) {
+            final bytes = <int>[];
+            await for (final c in request.finalize()) {
+              bytes.addAll(c);
+            }
+            patchBody =
+                json.decode(utf8.decode(bytes)) as Map<String, dynamic>;
+          }
+          return jsonResponse({'id': 'patch-uuid', 'number': 1}, status: 201);
+        }
+        fail('unexpected ${request.method} $path');
+      });
+
+      final client = CodePushClient(
+        httpClient: httpClient,
+        hostedUri: hostedUri,
+        artifactCacheRoot: cacheRoot,
+        uploadRetryBaseDelay: const Duration(milliseconds: 1),
+      );
+      final release = await client.createRelease(
+        appId: appId,
+        version: version,
+        flutterRevision: 'rev',
+      );
+      final patch = await client.createPatch(
+        appId: appId,
+        releaseId: release.id,
+        metadata: const {},
+      );
+      final diff = File(p.join(cacheRoot.path, 'semantic.diff'))
+        ..writeAsBytesSync(payload);
+
+      await client.createPatchArtifact(
+        artifactPath: diff.path,
+        appId: appId,
+        patchId: patch.id,
+        arch: 'aarch64',
+        platform: ReleasePlatform.ios,
+        hash: semanticHash,
+      );
+
+      expect(uploadInitHash, contentHash);
+      expect(patchBody!['hash'], semanticHash);
+      expect(patchBody!['artifact_path'], 'obj/diff.bin');
+    });
+
     test('emits per-chunk progress while uploading large files', () async {
       final payload = Uint8List(
         CodePushClient.chunkedUploadThresholdBytes + 100,

@@ -488,7 +488,6 @@ class CodePushClient {
     if (useChunked) {
       final uploaded = await _uploadArtifactBytes(
         bytes: bytes,
-        hash: hash,
         appId: appId,
         progressLabel: arch,
         onUploadProgress: onUploadProgress,
@@ -595,7 +594,6 @@ class CodePushClient {
     if (bytes.length > chunkedUploadThresholdBytes) {
       final uploaded = await _uploadArtifactBytes(
         bytes: bytes,
-        hash: hash,
         appId: appId,
         progressLabel: arch,
         onUploadProgress: onUploadProgress,
@@ -1089,7 +1087,6 @@ class CodePushClient {
     final bytes = await File(artifactPath).readAsBytes();
     final uploaded = await _uploadArtifactBytes(
       bytes: bytes,
-      hash: hash.isNotEmpty ? hash : null,
       appId: appId,
       progressLabel: arch,
       onUploadProgress: onUploadProgress,
@@ -1685,14 +1682,18 @@ class CodePushClient {
   /// Small payloads use `POST /admin/v1/artifacts` with `content_base64`.
   /// Larger payloads use chunked upload (`/admin/v1/uploads`) so reverse
   /// proxies with small `client_max_body_size` do not reject the request.
+  ///
+  /// Integrity hash is always sha256 of [bytes] (what lands on disk). Patchers
+  /// often upload a *diff* while the patch record's `hash` is the full AOT
+  /// snapshot — that semantic hash must not be sent as the upload hash, or
+  /// control_api returns `hash_mismatch` on `/uploads/.../complete`.
   Future<({String path, String hash})> _uploadArtifactBytes({
     required List<int> bytes,
-    String? hash,
     String? appId,
     String? progressLabel,
     ArtifactUploadProgressCallback? onUploadProgress,
   }) async {
-    final computed = hash ?? sha256.convert(bytes).toString();
+    final contentHash = sha256.convert(bytes).toString();
     if (bytes.length <= chunkedUploadThresholdBytes) {
       final upload = await _postJson(
         Uri.parse('$_admin/artifacts'),
@@ -1707,7 +1708,7 @@ class CodePushClient {
       final uploaded = await _json(upload);
       return (
         path: uploaded['path'] as String? ?? '',
-        hash: uploaded['hash'] as String? ?? computed,
+        hash: uploaded['hash'] as String? ?? contentHash,
       );
     }
 
@@ -1717,7 +1718,7 @@ class CodePushClient {
       body: json.encode({
         'size_bytes': bytes.length,
         'chunk_size': uploadChunkBytes,
-        'hash': computed,
+        'hash': contentHash,
         if (appId != null && appId.isNotEmpty) 'app_id': appId,
       }),
     );
@@ -1795,7 +1796,7 @@ class CodePushClient {
     final artifact = await _json(done);
     return (
       path: artifact['path'] as String? ?? '',
-      hash: artifact['hash'] as String? ?? computed,
+      hash: artifact['hash'] as String? ?? contentHash,
     );
   }
 
